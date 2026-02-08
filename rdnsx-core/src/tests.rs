@@ -24,7 +24,6 @@ fn test_record_type_hickory_conversion() {
 
 #[test]
 fn test_dns_record_creation() {
-    let timestamp = SystemTime::now();
     let record = DnsRecord::new(
         "example.com".to_string(),
         RecordType::A,

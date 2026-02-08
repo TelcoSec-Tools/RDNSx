@@ -286,7 +286,8 @@ mod tests {
             ttl: 300,
             response_code: ResponseCode::NoError,
             resolver: "127.0.0.1".to_string(),
-            timestamp: chrono::Utc::now(),
+            timestamp: std::time::SystemTime::now(),
+            query_time_ms: 10.5,
         }
     }
 
@@ -294,7 +295,7 @@ mod tests {
     fn test_cache_key() {
         let key1 = CacheKey::new("example.com", RecordType::A);
         let key2 = CacheKey::new("example.com", RecordType::A);
-        let key3 = CacheKey::new("example.com", RecordType::AAAA);
+        let key3 = CacheKey::new("example.com", RecordType::Aaaa);
 
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);

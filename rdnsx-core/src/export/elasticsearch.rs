@@ -7,10 +7,11 @@ use chrono::{DateTime, Utc};
 use elasticsearch::{
     Elasticsearch, http::transport::Transport,
     indices::IndicesCreateParts,
+    BulkParts,
 };
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::error::{DnsxError, Result};
 use crate::export::Exporter;
@@ -50,12 +51,31 @@ impl ElasticsearchExporter {
         }
 
         let doc_count = buffer.len();
+        debug!("Flushing {} documents to Elasticsearch index {}", doc_count, self._index);
 
-        // For now, temporarily disable bulk operations until API is clarified
-        buffer.clear(); // Clear the buffer
-        debug!("Elasticsearch bulk operations temporarily disabled due to API changes");
-        debug!("Would have sent {} documents to Elasticsearch", doc_count);
+        let mut bulk_body = String::new();
+        for doc in buffer.drain(..) {
+            bulk_body.push_str(&serde_json::to_string(&json!({"index": {}})).unwrap_or_default());
+            bulk_body.push('\n');
+            bulk_body.push_str(&serde_json::to_string(&doc).unwrap_or_default());
+            bulk_body.push('\n');
+        }
 
+        let response = self._client
+            .bulk(BulkParts::Index(&self._index))
+            .body(vec![bulk_body])
+            .send()
+            .await
+            .map_err(|e| DnsxError::Other(format!("Elasticsearch bulk request failed: {}", e)))?;
+
+        let status = response.status_code();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unavailable".to_string());
+            warn!("Elasticsearch bulk export failed with status {}: {}", status, error_text);
+            return Err(DnsxError::Other(format!("Elasticsearch bulk export failed: {}", status)));
+        }
+
+        debug!("Successfully flushed {} documents to Elasticsearch", doc_count);
         Ok(())
     }
 }

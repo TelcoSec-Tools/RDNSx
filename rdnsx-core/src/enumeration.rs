@@ -117,11 +117,13 @@ impl DnsEnumerator {
 
     /// Perform passive DNS enumeration using historical data
     pub async fn passive_dns_enumeration(&self, domain: &str) -> Result<crate::enumeration_types::PassiveDnsResult> {
-        use crate::enumeration_types::{PassiveDnsResult, PassiveSubdomain, HistoricalIp};
-
         info!("Performing passive DNS enumeration for: {}", domain);
 
-        let mut result = PassiveDnsResult {
+        let sources: Vec<Box<dyn PassiveDnsSource>> = vec![
+            Box::new(LocalResolutionSource::new(self.resolver_pool.clone())),
+        ];
+
+        let mut combined_result = crate::enumeration_types::PassiveDnsResult {
             domain: domain.to_string(),
             subdomains: Vec::new(),
             historical_ips: Vec::new(),
@@ -129,39 +131,21 @@ impl DnsEnumerator {
             data_sources: Vec::new(),
         };
 
-        // Common subdomain patterns to check
-        let common_prefixes = vec!["www", "mail", "ftp", "admin", "api", "dev", "staging", "test"];
-
-        for prefix in common_prefixes {
-            let subdomain = format!("{}.{}", prefix, domain);
-
-            // Check if subdomain exists (basic active check)
-            if let Ok((lookup, _)) = self.resolver_pool.query(&subdomain, RecordType::A).await {
-                if !lookup.iter().next().is_none() {
-                    result.subdomains.push(PassiveSubdomain {
-                        name: subdomain,
-                        record_type: "A".to_string(),
-                        first_seen: chrono::Utc::now() - chrono::Duration::days(365),
-                        last_seen: chrono::Utc::now(),
-                        source: "active_resolution".to_string(),
-                    });
+        for source in sources {
+            if let Ok(result) = source.lookup(domain).await {
+                combined_result.subdomains.extend(result.subdomains);
+                combined_result.historical_ips.extend(result.historical_ips);
+                combined_result.data_sources.push(source.name().to_string());
+                
+                if let Some(source_last_seen) = result.last_seen {
+                    if combined_result.last_seen.is_none() || Some(source_last_seen) > combined_result.last_seen {
+                        combined_result.last_seen = Some(source_last_seen);
+                    }
                 }
             }
         }
 
-        // Simulate some historical IP data
-        if !result.subdomains.is_empty() {
-            result.historical_ips.push(HistoricalIp {
-                ip: "192.0.2.1".parse().unwrap(),
-                first_seen: chrono::Utc::now() - chrono::Duration::days(365),
-                last_seen: chrono::Utc::now(),
-            });
-        }
-
-        result.data_sources.push("local_resolution".to_string());
-        result.last_seen = Some(chrono::Utc::now());
-
-        Ok(result)
+        Ok(combined_result)
     }
 
     /// Analyze wildcard DNS configurations and bypass techniques
@@ -430,31 +414,75 @@ impl DnsEnumerator {
 
         Ok(result)
     }
-
-
-
-
-
 }
 
-
-
-/// Passive DNS subdomain information
-#[derive(Debug, Clone)]
-pub struct PassiveSubdomain {
-    pub name: String,
-    pub record_type: String,
-    pub first_seen: chrono::DateTime<chrono::Utc>,
-    pub last_seen: chrono::DateTime<chrono::Utc>,
-    pub source: String,
+/// Trait for passive DNS data sources
+#[async_trait::async_trait]
+pub trait PassiveDnsSource: Send + Sync {
+    /// Name of the data source
+    fn name(&self) -> &str;
+    
+    /// Perform lookup for a domain
+    async fn lookup(&self, domain: &str) -> Result<crate::enumeration_types::PassiveDnsResult>;
 }
 
-/// Historical IP address information
-#[derive(Debug, Clone)]
-pub struct HistoricalIp {
-    pub ip: std::net::IpAddr,
-    pub first_seen: chrono::DateTime<chrono::Utc>,
-    pub last_seen: chrono::DateTime<chrono::Utc>,
+/// Local resolution-based "passive" source (basic prefix brute-force)
+pub struct LocalResolutionSource {
+    resolver_pool: Arc<ResolverPool>,
+}
+
+impl LocalResolutionSource {
+    pub fn new(resolver_pool: Arc<ResolverPool>) -> Self {
+        Self { resolver_pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl PassiveDnsSource for LocalResolutionSource {
+    fn name(&self) -> &str {
+        "local_resolution"
+    }
+
+    async fn lookup(&self, domain: &str) -> Result<crate::enumeration_types::PassiveDnsResult> {
+        use crate::enumeration_types::{PassiveDnsResult, PassiveSubdomain, HistoricalIp};
+        
+        let mut result = PassiveDnsResult {
+            domain: domain.to_string(),
+            subdomains: Vec::new(),
+            historical_ips: Vec::new(),
+            last_seen: Some(chrono::Utc::now()),
+            data_sources: vec![self.name().to_string()],
+        };
+
+        let common_prefixes = vec!["www", "mail", "ftp", "admin", "api", "dev", "staging", "test"];
+
+        for prefix in common_prefixes {
+            let subdomain = format!("{}.{}", prefix, domain);
+
+            if let Ok((lookup, _)) = self.resolver_pool.query(&subdomain, RecordType::A).await {
+                if lookup.iter().next().is_some() {
+                    result.subdomains.push(PassiveSubdomain {
+                        name: subdomain,
+                        record_type: "A".to_string(),
+                        first_seen: chrono::Utc::now() - chrono::Duration::days(365),
+                        last_seen: chrono::Utc::now(),
+                        source: self.name().to_string(),
+                    });
+                }
+            }
+        }
+
+        // Simulate historical IP for demonstration
+        if !result.subdomains.is_empty() {
+            result.historical_ips.push(HistoricalIp {
+                ip: "192.0.2.1".parse().unwrap(),
+                first_seen: chrono::Utc::now() - chrono::Duration::days(365),
+                last_seen: chrono::Utc::now(),
+            });
+        }
+
+        Ok(result)
+    }
 }
 
 

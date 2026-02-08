@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{RecordType, RecordValue, ResponseCode};
 
 /// DNS record
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DnsRecord {
     /// Domain name queried
     pub domain: String,
