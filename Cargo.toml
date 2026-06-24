@@ -17,7 +17,7 @@ categories = ["network-programming", "command-line-utilities"]
 tokio = { version = "1.35", features = ["full"] }
 
 # DNS
-hickory-resolver = { version = "0.24", features = ["dns-over-rustls", "dns-over-https-rustls", "dns-over-tls", "dns-over-https", "system-config"] }
+hickory-resolver = { version = "0.26", features = ["dns-over-rustls", "dns-over-https-rustls", "dns-over-tls", "dns-over-https", "system-config"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
