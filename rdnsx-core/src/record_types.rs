@@ -115,13 +115,13 @@ impl RecordType {
             // RecordType::Afsdb => HRecordType::AFSDB,
             RecordType::Caa => HRecordType::CAA,
             // RecordType::Cert => HRecordType::CERT,
-            RecordType::Dname => HRecordType::ANAME,
+            RecordType::Dname => HRecordType::Unknown(39),
             RecordType::Dnskey => HRecordType::DNSKEY,
             RecordType::Ds => HRecordType::DS,
             RecordType::Hinfo => HRecordType::HINFO,
             RecordType::Https => HRecordType::HTTPS,
             RecordType::Key => HRecordType::KEY,
-            // RecordType::Loc => HRecordType::LOC,
+            RecordType::Loc => HRecordType::Unknown(29),
             RecordType::Naptr => HRecordType::NAPTR,
             RecordType::Nsec => HRecordType::NSEC,
             RecordType::Nsec3 => HRecordType::NSEC3,
@@ -130,9 +130,9 @@ impl RecordType {
             RecordType::Sshfp => HRecordType::SSHFP,
             RecordType::Svcb => HRecordType::SVCB,
             RecordType::Tlsa => HRecordType::TLSA,
-            // RecordType::Uri => HRecordType::URI,
-            // Unsupported record types - return A as fallback
-            RecordType::Afsdb | RecordType::Cert | RecordType::Loc | RecordType::Uri => HRecordType::A,
+            RecordType::Afsdb => HRecordType::Unknown(18),
+            RecordType::Cert => HRecordType::Unknown(37),
+            RecordType::Uri => HRecordType::Unknown(256),
         }
     }
 }

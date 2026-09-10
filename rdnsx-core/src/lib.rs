@@ -45,7 +45,7 @@ pub use export::cassandra::{CassandraConfig, CassandraMetrics};
 pub use bruteforce::Bruteforcer;
 pub use wildcard::{WildcardFilter, WildcardAnalysis, WildcardBypassAttempt};
 pub use resolver::ResolverPool;
-pub use input::{parse_asn, parse_ip_range, reverse_ip};
+pub use input::{parse_asn, parse_ip_range, parse_ip_range_limited, reverse_ip};
 
 #[cfg(test)]
 mod tests;

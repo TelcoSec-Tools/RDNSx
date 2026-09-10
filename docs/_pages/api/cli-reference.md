@@ -5,7 +5,7 @@ description: "Complete command-line interface reference for RDNSx DNS toolkit. A
 keywords: "RDNSx CLI, command reference, DNS commands, ASN enumeration, reverse DNS, command line interface, documentation"
 og_image: /assets/images/logo.svg
 twitter_card: summary_large_image
-author: "Quinas Project"
+author: "TelcoSec"
 lang: en-US
 permalink: /api/cli-reference/
 priority: 0.8

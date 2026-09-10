@@ -114,57 +114,56 @@ pub enum RecordValue {
     Other(String),
 }
 
-impl RecordValue {
-    /// Convert to string representation
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for RecordValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RecordValue::Ip(ip) => ip.to_string(),
-            RecordValue::Domain(d) => d.clone(),
-            RecordValue::Text(t) => t.clone(),
-            RecordValue::Mx { priority, exchange } => format!("{} {}", priority, exchange),
+            RecordValue::Ip(ip) => write!(f, "{}", ip),
+            RecordValue::Domain(d) => write!(f, "{}", d),
+            RecordValue::Text(t) => write!(f, "{}", t),
+            RecordValue::Mx { priority, exchange } => write!(f, "{} {}", priority, exchange),
             RecordValue::Srv {
                 priority,
                 weight,
                 port,
                 target,
-            } => format!("{} {} {} {}", priority, weight, port, target),
-            RecordValue::Soa { .. } => "SOA".to_string(), // SOA is complex, simplified here
-            RecordValue::Caa { flags, tag, value } => format!("{} {} {}", flags, tag, value),
+            } => write!(f, "{} {} {} {}", priority, weight, port, target),
+            RecordValue::Soa { .. } => write!(f, "SOA"), // SOA is complex, simplified here
+            RecordValue::Caa { flags, tag, value } => write!(f, "{} {} {}", flags, tag, value),
             RecordValue::Cert { cert_type, key_tag, algorithm, .. } => {
-                format!("{} {} {}", cert_type, key_tag, algorithm)
+                write!(f, "{} {} {}", cert_type, key_tag, algorithm)
             }
             RecordValue::Dnskey { flags, protocol, algorithm, .. } => {
-                format!("{} {} {}", flags, protocol, algorithm)
+                write!(f, "{} {} {}", flags, protocol, algorithm)
             }
             RecordValue::Ds { key_tag, algorithm, digest_type, .. } => {
-                format!("{} {} {}", key_tag, algorithm, digest_type)
+                write!(f, "{} {} {}", key_tag, algorithm, digest_type)
             }
-            RecordValue::Hinfo { cpu, os } => format!("{} {}", cpu, os),
+            RecordValue::Hinfo { cpu, os } => write!(f, "{} {}", cpu, os),
             RecordValue::Https { priority, target, params } => {
-                format!("{} {} {}", priority, target, params.join(" "))
+                write!(f, "{} {} {}", priority, target, params.join(" "))
             }
             RecordValue::Key { flags, protocol, algorithm, .. } => {
-                format!("{} {} {}", flags, protocol, algorithm)
+                write!(f, "{} {} {}", flags, protocol, algorithm)
             }
             RecordValue::Loc { latitude, longitude, altitude, .. } => {
-                format!("{} {} {}", latitude, longitude, altitude)
+                write!(f, "{} {} {}", latitude, longitude, altitude)
             }
             RecordValue::Naptr { order, preference, flags, services, regexp, replacement } => {
-                format!("{} {} {} {} {} {}", order, preference, flags, services, regexp, replacement)
+                write!(f, "{} {} {} {} {} {}", order, preference, flags, services, regexp, replacement)
             }
             RecordValue::Sshfp { algorithm, fingerprint_type, .. } => {
-                format!("{} {}", algorithm, fingerprint_type)
+                write!(f, "{} {}", algorithm, fingerprint_type)
             }
             RecordValue::Svcb { priority, target, params } => {
-                format!("{} {} {}", priority, target, params.join(" "))
+                write!(f, "{} {} {}", priority, target, params.join(" "))
             }
             RecordValue::Tlsa { cert_usage, selector, matching_type, .. } => {
-                format!("{} {} {}", cert_usage, selector, matching_type)
+                write!(f, "{} {} {}", cert_usage, selector, matching_type)
             }
             RecordValue::Uri { priority, weight, target } => {
-                format!("{} {} {}", priority, weight, target)
+                write!(f, "{} {} {}", priority, weight, target)
             }
-            RecordValue::Other(o) => o.clone(),
+            RecordValue::Other(o) => write!(f, "{}", o),
         }
     }
 }

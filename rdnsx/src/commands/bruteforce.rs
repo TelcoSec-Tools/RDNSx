@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Args;
-use rdnsx_core::{DnsxClient, RecordType};
+use rdnsx_core::{Bruteforcer, DnsxClient, RecordType};
 
 use crate::cli::Config;
 use crate::output_writer::OutputWriter;
@@ -29,7 +29,6 @@ pub struct BruteforceArgs {
 }
 
 pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
-    eprintln!("DEBUG: Starting bruteforce command");
     // Parse record type
     let record_type = match args.record_type.to_uppercase().as_str() {
         "A" => RecordType::A,
@@ -43,8 +42,7 @@ pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
         "SRV" => RecordType::Srv,
         "CAA" => RecordType::Caa,
         _ => {
-            eprintln!("Unsupported record type: {}", args.record_type);
-            std::process::exit(1);
+            bail!("Unsupported record type: {}", args.record_type);
         }
     };
 
@@ -57,6 +55,7 @@ pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
         rate_limit: config.core_config.performance.rate_limit,
     };
     let client = Arc::new(DnsxClient::with_options(dns_options)?);
+    let bruteforcer = Bruteforcer::new(Arc::clone(&client), config.core_config.performance.threads);
 
     // Create output writer
     let mut output = OutputWriter::new(config.output_file.clone(), config.json_output, config.silent)?;
@@ -67,33 +66,20 @@ pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
             eprintln!("Enumerating subdomains for {}", domain);
         }
 
-        // Simple test: just try www.{domain}
-        let test_subdomain = format!("www.{}", domain);
+        let results = bruteforcer
+            .enumerate_with_records(domain, &args.wordlist, &args.placeholder, record_type)
+            .await?;
 
-        match client.query(&test_subdomain, record_type).await {
-            Ok(records) => {
-                if !records.is_empty() {
-                    if !config.silent {
-                        eprintln!("Found subdomain: {} with {} records", test_subdomain, records.len());
-                    }
-                    for record in records {
-                        output.write_record(&record, false)?;
-                    }
-                } else {
-                    if !config.silent {
-                        eprintln!("No records found for: {}", test_subdomain);
-                    }
-                }
+        for (subdomain, records) in results {
+            if !config.silent {
+                eprintln!("Found subdomain: {} with {} records", subdomain, records.len());
             }
-            Err(e) => {
-                if !config.silent {
-                    eprintln!("Error querying {}: {}", test_subdomain, e);
-                }
+            for record in records {
+                output.write_record(&record, false)?;
             }
         }
     }
 
     output.flush()?;
-    eprintln!("DEBUG: Finished bruteforce command");
     Ok(())
 }

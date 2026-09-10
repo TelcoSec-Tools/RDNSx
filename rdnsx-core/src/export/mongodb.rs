@@ -48,14 +48,16 @@ impl MongodbExporter {
             return Ok(());
         }
 
-        let documents = buffer.drain(..).collect::<Vec<_>>();
+        let documents = buffer.clone();
+        let doc_count = documents.len();
 
         self.collection
-            .insert_many(documents.clone())
+            .insert_many(documents)
             .await
             .map_err(|e| DnsxError::Export(format!("MongoDB insert error: {}", e)))?;
 
-        debug!("Flushed {} documents to MongoDB", documents.len());
+        buffer.clear();
+        debug!("Flushed {} documents to MongoDB", doc_count);
         Ok(())
     }
 }

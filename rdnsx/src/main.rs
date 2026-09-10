@@ -10,8 +10,7 @@ mod output_writer;
 
 use cli::Cli;
 
-fn print_banner() {
-    println!(r#"
+pub const BANNER: &str = r#"
 ██████╗ ██████╗ ███╗   ██╗███████╗██╗  ██╗
 ██╔══██╗██╔══██╗████╗  ██║██╔════╝╚██╗██╔╝
 ██████╔╝██║  ██║██╔██╗ ██║███████╗ ╚███╔╝
@@ -19,9 +18,12 @@ fn print_banner() {
 ██║  ██║██████╔╝██║ ╚████║███████║██╔╝ ██╗
 ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
 
-          Quinas Project by RFS
+              TelcoSec RDNSx
     Fast and multi-purpose DNS toolkit
-"#);
+"#;
+
+pub fn print_banner() {
+    print!("{}", BANNER);
 }
 
 #[tokio::main]

@@ -1,9 +1,10 @@
 //! Common enumeration result types
 
 use std::net::IpAddr;
+use serde::{Deserialize, Serialize};
 
 /// Results from IPv6 enumeration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ipv6EnumerationResult {
     pub domain: String,
     pub ipv6_addresses: Vec<IpAddr>,
@@ -13,7 +14,7 @@ pub struct Ipv6EnumerationResult {
 }
 
 /// Results from passive DNS enumeration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PassiveDnsResult {
     pub domain: String,
     pub subdomains: Vec<PassiveSubdomain>,
@@ -23,7 +24,7 @@ pub struct PassiveDnsResult {
 }
 
 /// Passive DNS subdomain information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PassiveSubdomain {
     pub name: String,
     pub record_type: String,
@@ -33,7 +34,7 @@ pub struct PassiveSubdomain {
 }
 
 /// Historical IP address information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoricalIp {
     pub ip: IpAddr,
     pub first_seen: chrono::DateTime<chrono::Utc>,
@@ -41,7 +42,7 @@ pub struct HistoricalIp {
 }
 
 /// DNS server fingerprint
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsServerFingerprint {
     pub server: String,
     pub version_bind: Option<String>,
@@ -52,7 +53,7 @@ pub struct DnsServerFingerprint {
 }
 
 /// Results from ASN enumeration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsnEnumerationResult {
     pub asn: String,
     pub name: Option<String>,

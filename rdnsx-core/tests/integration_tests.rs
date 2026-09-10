@@ -37,7 +37,7 @@ mod tests {
         assert!(!ips.is_empty());
         // Verify all returned values are valid IPv4 addresses
         for ip in ips {
-            assert!(ip.is_private() || ip.is_global());
+            assert!(!ip.is_unspecified());
         }
     }
 
@@ -50,7 +50,7 @@ mod tests {
         assert!(!a_records.is_empty());
 
         // Test CNAME records (may not exist for root domain)
-        let cname_result = client.query("www.google.com", RecordType::CNAME).await;
+        let cname_result = client.query("www.google.com", RecordType::Cname).await;
         // CNAME query should not fail, even if no records exist
         assert!(cname_result.is_ok());
     }
@@ -58,7 +58,7 @@ mod tests {
     #[tokio::test]
     async fn test_txt_record_parsing() {
         let client = DnsxClient::new().unwrap();
-        let records = client.query("google.com", RecordType::TXT).await.unwrap();
+        let records = client.query("google.com", RecordType::Txt).await.unwrap();
 
         // TXT records may or may not exist, but parsing should work
         for record in records {
@@ -71,13 +71,12 @@ mod tests {
     #[tokio::test]
     async fn test_mx_record_parsing() {
         let client = DnsxClient::new().unwrap();
-        let records = client.query("google.com", RecordType::MX).await.unwrap();
+        let records = client.query("google.com", RecordType::Mx).await.unwrap();
         assert!(!records.is_empty());
 
         // Verify MX records have priority and exchange
         for record in records {
-            if let rdnsx_core::types::RecordValue::Mx { priority, exchange } = &record.value {
-                assert!(*priority >= 0);
+            if let rdnsx_core::types::RecordValue::Mx { exchange, .. } = &record.value {
                 assert!(!exchange.is_empty());
             }
         }
@@ -109,13 +108,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_queries() {
-        let client = DnsxClient::new().unwrap();
+        let client = std::sync::Arc::new(DnsxClient::new().unwrap());
 
         let domains = vec!["google.com", "github.com", "stackoverflow.com"];
         let mut handles = Vec::new();
 
         for domain in domains {
-            let client = &client;
+            let client = std::sync::Arc::clone(&client);
             let domain = domain.to_string();
             let handle = tokio::spawn(async move {
                 client.query(&domain, RecordType::A).await

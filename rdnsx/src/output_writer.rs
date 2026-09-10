@@ -2,27 +2,36 @@
 
 use anyhow::Result;
 use rdnsx_core::DnsRecord;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 
 pub struct OutputWriter {
-    writer: Box<dyn Write>,
+    writer: BufWriter<Box<dyn Write>>,
     json_output: bool,
     silent: bool,
 }
 
 impl OutputWriter {
     pub fn new(output_file: Option<String>, json_output: bool, silent: bool) -> Result<Self> {
-        let writer: Box<dyn Write> = if let Some(file) = output_file {
+        let raw_writer: Box<dyn Write> = if let Some(file) = output_file {
             Box::new(std::fs::File::create(file)?)
         } else {
             Box::new(io::stdout())
         };
 
         Ok(Self {
-            writer,
+            writer: BufWriter::new(raw_writer),
             json_output,
             silent,
         })
+    }
+
+    pub fn is_json(&self) -> bool {
+        self.json_output
+    }
+
+    #[allow(dead_code)]
+    pub fn is_silent(&self) -> bool {
+        self.silent
     }
 
     pub fn write_record(&mut self, record: &DnsRecord, resp_only: bool) -> Result<()> {
@@ -30,16 +39,32 @@ impl OutputWriter {
             return Ok(());
         }
 
-        let output = if resp_only {
-            record.value.to_string()
+        if resp_only {
+            writeln!(self.writer, "{}", record.value)?;
         } else if self.json_output {
-            serde_json::to_string(record)?
+            let json = serde_json::to_string(record)?;
+            writeln!(self.writer, "{}", json)?;
         } else {
-            format!("{}\n", record)
-        };
+            writeln!(self.writer, "{}", record)?;
+        }
 
-        write!(self.writer, "{}", output)?;
-        self.writer.flush()?;
+        Ok(())
+    }
+
+    pub fn write_json<T: serde::Serialize>(&mut self, value: &T) -> Result<()> {
+        if self.silent {
+            return Ok(());
+        }
+        let json = serde_json::to_string_pretty(value)?;
+        writeln!(self.writer, "{}", json)?;
+        Ok(())
+    }
+
+    pub fn write_line(&mut self, line: &str) -> Result<()> {
+        if self.silent {
+            return Ok(());
+        }
+        writeln!(self.writer, "{}", line)?;
         Ok(())
     }
 

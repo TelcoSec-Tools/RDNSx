@@ -51,7 +51,7 @@ impl ResolverPool {
         }
 
         // Store primary resolver address
-        let primary_resolver_addr = resolver_configs[0].clone();
+        let primary_resolver_addr = resolver_configs[0];
 
         // Create primary resolver
         let primary_config = create_resolver_config(&resolver_configs[0..1].iter().map(|addr| addr.to_string()).collect::<Vec<_>>())?;
@@ -62,23 +62,10 @@ impl ResolverPool {
         resolver_opts.use_hosts_file = false; // Don't use hosts file
         resolver_opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6; // Prefer IPv4
 
-        // Try system resolver first
-        debug!("Attempting to use system resolver configuration");
-        let system_resolver = TokioAsyncResolver::tokio_from_system_conf();
-
-        let resolver = match system_resolver {
-            Ok(resolver) => {
-                debug!("Successfully created system resolver");
-                resolver
-            }
-            Err(e) => {
-                debug!("System resolver failed ({}), using manual configuration", e);
-                debug!("Creating resolver with config: {:?}", primary_config);
-                debug!("Resolver options: timeout={:?}, attempts={}, validate={}", resolver_opts.timeout, resolver_opts.attempts, resolver_opts.validate);
-
-                TokioAsyncResolver::tokio(primary_config, resolver_opts.clone())
-            }
-        };
+        // Create primary resolver using specified primary configuration
+        debug!("Creating primary resolver for {} with config: {:?}", primary_resolver_addr, primary_config);
+        debug!("Resolver options: timeout={:?}, attempts={}, validate={}", resolver_opts.timeout, resolver_opts.attempts, resolver_opts.validate);
+        let resolver = TokioAsyncResolver::tokio(primary_config, resolver_opts.clone());
 
         // Create backup resolvers if any
         let mut backup_resolvers = Vec::new();
@@ -145,6 +132,13 @@ impl ResolverPool {
                 Ok((lookup, resolver_addr.to_string()))
             }
             Ok(Err(e)) => {
+                if let hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. } = e.kind() {
+                    let empty_lookup = hickory_resolver::lookup::Lookup::new_with_max_ttl(
+                        hickory_resolver::proto::op::Query::query(domain_name.clone(), record_type.to_hickory()),
+                        std::sync::Arc::new([])
+                    );
+                    return Ok((empty_lookup, resolver_addr.to_string()));
+                }
                 debug!("Resolver {} failed for {}: {}", resolver_addr, domain, e);
                 // Try other resolvers with failover
                 self.try_failover_resolvers(&domain_name, record_type, resolver_index).await
@@ -194,6 +188,13 @@ impl ResolverPool {
                     return Ok((response, resolver_addr.to_string()));
                 }
                 Ok(Err(e)) => {
+                    if let hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. } = e.kind() {
+                        let empty_lookup = hickory_resolver::lookup::Lookup::new_with_max_ttl(
+                            hickory_resolver::proto::op::Query::query(domain_name.clone(), record_type.to_hickory()),
+                            std::sync::Arc::new([])
+                        );
+                        return Ok((empty_lookup, resolver_addr.to_string()));
+                    }
                     debug!("Failover resolver {} failed: {}", resolver_addr, e);
                 }
                 Err(_) => {

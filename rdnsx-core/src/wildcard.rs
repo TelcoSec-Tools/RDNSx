@@ -13,8 +13,10 @@ use crate::types::RecordType;
 
 use crate::types::DnsRecord;
 
+use serde::{Deserialize, Serialize};
+
 /// Wildcard detection and bypass results
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WildcardAnalysis {
     pub domain: String,
     pub has_wildcard: bool,
@@ -25,7 +27,7 @@ pub struct WildcardAnalysis {
 }
 
 /// Attempt to bypass wildcard detection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WildcardBypassAttempt {
     pub technique: String,
     pub test_domain: String,
@@ -173,7 +175,7 @@ impl WildcardFilter {
         });
 
         // Technique 3: Use underscore in subdomain
-        let underscore_domain = format!("test_ subdomain.{}", domain);
+        let underscore_domain = format!("test_subdomain.{}", domain);
         let result = self.test_domain_resolution(&underscore_domain).await;
         attempts.push(WildcardBypassAttempt {
             technique: "Underscore in subdomain".to_string(),
@@ -226,7 +228,7 @@ impl WildcardFilter {
         // Group records by domain
         for record in records {
             domain_groups.entry(record.domain.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(record);
         }
 
@@ -319,12 +321,12 @@ impl WildcardFilter {
         for record in records {
             if let crate::types::RecordValue::Ip(ip) = &record.value {
                 let ip_str = ip.to_string();
-                ip_to_domains.entry(ip_str).or_insert_with(Vec::new).push(record);
+                ip_to_domains.entry(ip_str).or_default().push(record);
             } else {
                 // Non-IP records, keep them with their value as key
                 ip_to_domains
                     .entry(record.value.to_string())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(record);
             }
         }
@@ -338,9 +340,8 @@ impl WildcardFilter {
                 // Test if it's a wildcard
                 let mut is_wildcard_ip = false;
                 if let Some(first_record) = domain_records.first() {
-                    match self.is_wildcard(&first_record.domain).await {
-                        Ok(true) => is_wildcard_ip = true,
-                        _ => {}
+                    if let Ok(true) = self.is_wildcard(&first_record.domain).await {
+                        is_wildcard_ip = true;
                     }
                 }
 

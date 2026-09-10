@@ -56,7 +56,7 @@ impl std::fmt::Display for DnsRecord {
             f,
             "{} [{}]",
             self.domain,
-            self.value.to_string()
+            self.value
         )
     }
 }

@@ -5,7 +5,7 @@ description: "Get started with RDNSx DNS toolkit in minutes. Learn basic DNS que
 keywords: "RDNSx quick start, DNS queries, ASN enumeration, reverse DNS, getting started, tutorial"
 og_image: /assets/images/logo.svg
 twitter_card: summary_large_image
-author: "Quinas Project"
+author: "TelcoSec"
 lang: en-US
 permalink: /guide/quick-start/
 priority: 0.9
@@ -32,7 +32,7 @@ Output:
 ██║  ██║██████╔╝██║ ╚████║███████║██╔╝ ██╗
 ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
 
-          Quinas Project by RFS
+              TelcoSec RDNSx
     Fast and multi-purpose DNS toolkit
 
 example.com 300 IN A 93.184.216.34

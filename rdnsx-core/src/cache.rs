@@ -167,11 +167,20 @@ impl DnsCache {
         cache.retain(|_, cached| cached.is_valid());
     }
 
-    /// Evict oldest entries (simple LRU approximation)
+    /// Evict oldest entries based on cached_at timestamp
     fn evict_oldest(&self, cache: &mut HashMap<CacheKey, CachedResponse>) {
-        // For simplicity, just remove 10% of entries
         let to_remove = (cache.len() / 10).max(1);
-        let keys_to_remove: Vec<CacheKey> = cache.keys().take(to_remove).cloned().collect();
+        let mut entries: Vec<(&CacheKey, Instant)> = cache
+            .iter()
+            .map(|(k, v)| (k, v.cached_at))
+            .collect();
+        entries.sort_by_key(|&(_, cached_at)| cached_at);
+
+        let keys_to_remove: Vec<CacheKey> = entries
+            .into_iter()
+            .take(to_remove)
+            .map(|(k, _)| k.clone())
+            .collect();
 
         for key in keys_to_remove {
             cache.remove(&key);
@@ -228,11 +237,12 @@ where
         // Query upstream
         let records = self.client.query(domain, record_type).await?;
 
-        // Cache the result (use minimum TTL from records or default)
+        // Cache the result (use minimum TTL from records, or a short negative-cache
+        // TTL for empty results so transient NXDOMAIN/NODATA answers don't stick around)
         let min_ttl = records.iter()
             .map(|r| Duration::from_secs(r.ttl as u64))
             .min()
-            .unwrap_or(Duration::from_secs(300)); // 5 minutes default
+            .unwrap_or(Duration::from_secs(30));
 
         self.cache.put(key, records.clone(), Some(min_ttl));
 

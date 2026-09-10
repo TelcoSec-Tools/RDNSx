@@ -36,31 +36,20 @@ impl QueryEngine {
         // Extract records from lookup
         for record in lookup.records() {
             debug!("Processing Record: {:?}", record);
-            let value = parse_rdata(record.data().expect("Record data missing"))?;
-            let ttl = record.ttl() as u32;
+            if let Some(rdata) = record.data() {
+                let value = parse_rdata(rdata)?;
+                let ttl = record.ttl();
 
-            records.push(DnsRecord::new(
-                domain.to_string(),
-                record_type,
-                value,
-                ttl,
-                response_code,
-                resolver_addr.clone(),
-                query_time_ms,
-            ));
-        }
-
-        // If no records but response was successful, still create a record entry
-        if records.is_empty() && response_code == ResponseCode::NoError {
-            records.push(DnsRecord::new(
-                domain.to_string(),
-                record_type,
-                RecordValue::Other("No records found".to_string()),
-                0,
-                response_code,
-                resolver_addr,
-                query_time_ms,
-            ));
+                records.push(DnsRecord::new(
+                    domain.to_string(),
+                    record_type,
+                    value,
+                    ttl,
+                    response_code,
+                    resolver_addr.clone(),
+                    query_time_ms,
+                ));
+            }
         }
 
         Ok(records)
@@ -113,13 +102,11 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
             minimum: soa.minimum(),
         }),
         RData::ANAME(dname) => Ok(RecordValue::Domain(dname.to_string())),
-        // CAA parsing temporarily disabled due to API compatibility issues
-        // RData::CAA(caa) => Ok(RecordValue::Caa {
-        //     flags: caa.issuer_critical() as u8,
-        //     tag: caa.tag().to_string(),
-        //     value: String::from_utf8_lossy(caa.value().as_ref()).to_string(),
-        // }),
-        RData::CAA(_) => Ok(RecordValue::Text("CAA record parsing disabled".to_string())),
+        RData::CAA(caa) => Ok(RecordValue::Caa {
+            flags: if caa.issuer_critical() { 128 } else { 0 },
+            tag: caa.tag().as_str().to_string(),
+            value: format!("{}", caa.value()),
+        }),
         RData::SSHFP(sshfp) => Ok(RecordValue::Sshfp {
             algorithm: sshfp.algorithm().into(),
             fingerprint_type: sshfp.fingerprint_type().into(),
@@ -157,6 +144,10 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         //     longitude: loc.longitude(),
         //     altitude: loc.altitude(),
         // }),
+        RData::Unknown { code, rdata: raw } => {
+            let hex = raw.anything().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+            Ok(RecordValue::Other(format!("TYPE{} \\# {} {}", u16::from(*code), raw.anything().len(), hex)))
+        }
         // For complex records we don't fully parse yet, return as Other
         _ => Ok(RecordValue::Other(format!("{:?}", rdata))),
     }

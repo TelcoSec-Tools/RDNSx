@@ -8,8 +8,10 @@ use crate::error::Result;
 use crate::resolver::ResolverPool;
 use crate::types::RecordType;
 
+use serde::{Deserialize, Serialize};
+
 /// Results from CDN detection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CdnDetectionResult {
     pub domain: String,
     pub cdn_provider: Option<String>,
@@ -22,14 +24,14 @@ pub struct CdnDetectionResult {
 }
 
 /// CNAME chain hop
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CnameHop {
     pub from: String,
     pub to: String,
 }
 
 /// CDN analysis results
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CdnAnalysis {
     pub is_behind_cdn: bool,
     pub confidence_score: f64,
@@ -40,7 +42,7 @@ pub struct CdnAnalysis {
 }
 
 /// TTL analysis for CDN detection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TtlAnalysis {
     pub average_ttl: u32,
     pub min_ttl: u32,
@@ -50,7 +52,7 @@ pub struct TtlAnalysis {
 }
 
 /// Geographic distribution analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeographicDistribution {
     pub unique_countries: usize,
     pub unique_asns: usize,
@@ -59,7 +61,7 @@ pub struct GeographicDistribution {
 }
 
 /// Response time analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseTimeAnalysis {
     pub average_response_time_ms: f64,
     pub min_response_time_ms: f64,
@@ -69,7 +71,7 @@ pub struct ResponseTimeAnalysis {
 }
 
 /// Origin server information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OriginServerInfo {
     pub ip: IpAddr,
     pub is_cloud_provider: bool,
@@ -78,7 +80,7 @@ pub struct OriginServerInfo {
 }
 
 /// ASN information for IP addresses
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsnInfo {
     pub asn: u32,
     pub organization: String,
@@ -132,7 +134,7 @@ impl CdnDetector {
                 if let hickory_resolver::proto::rr::RData::A(ip) = record.data().expect("Record data missing") {
                     let ip_addr = IpAddr::V4(**ip);
                     all_ips.push(ip_addr);
-                    all_ttls.push(record.ttl() as u32);
+                    all_ttls.push(record.ttl());
                 }
             }
 
@@ -178,22 +180,18 @@ impl CdnDetector {
             visited.insert(current_domain.clone());
 
             if let Ok((lookup, _)) = self.resolver_pool.query(&current_domain, RecordType::Cname).await {
-                if let Some(rdata) = lookup.iter().next() {
-                    if let hickory_resolver::proto::rr::RData::CNAME(cname) = rdata {
-                        let cname_target = cname.to_string();
-                        chain.push(CnameHop {
-                            from: current_domain.clone(),
-                            to: cname_target.clone(),
-                        });
+                if let Some(hickory_resolver::proto::rr::RData::CNAME(cname)) = lookup.iter().next() {
+                    let cname_target = cname.to_string();
+                    chain.push(CnameHop {
+                        from: current_domain.clone(),
+                        to: cname_target.clone(),
+                    });
 
-                        current_domain = cname_target;
+                    current_domain = cname_target;
 
-                        // Check if this looks like a CDN
-                        if let Some(detected_provider) = Self::identify_cdn_provider(&current_domain) {
-                            provider = Some(detected_provider);
-                        }
-                    } else {
-                        break;
+                    // Check if this looks like a CDN
+                    if let Some(detected_provider) = Self::identify_cdn_provider(&current_domain) {
+                        provider = Some(detected_provider);
                     }
                 } else {
                     break;
@@ -722,7 +720,7 @@ impl CdnDetector {
         let consistency_score = 1.0 / (1.0 + variance.sqrt() / avg_ttl);
 
         // Check if TTL is typical for CDN (usually 300-3600 seconds for CDN edge records)
-        let cdn_typical_ttl = avg_ttl >= 300.0 && avg_ttl <= 3600.0;
+        let cdn_typical_ttl = (300.0..=3600.0).contains(&avg_ttl);
 
         TtlAnalysis {
             average_ttl: avg_ttl as u32,

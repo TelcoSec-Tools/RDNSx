@@ -1,7 +1,3 @@
-//! Unit tests for RDNSx core
-
-use std::time::{Duration, SystemTime};
-
 use crate::types::{DnsRecord, RecordType, RecordValue, ResponseCode};
 
 #[test]

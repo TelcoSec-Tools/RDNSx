@@ -9,7 +9,8 @@ use rdnsx_core::config::Config as CoreConfig;
 
 #[derive(Parser)]
 #[command(name = "rdnsx")]
-#[command(about = "Fast and multi-purpose DNS toolkit by Quinas Project", long_about = None)]
+#[command(about = "Fast and multi-purpose DNS toolkit by TelcoSec", long_about = None)]
+#[command(before_help = crate::BANNER)]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
@@ -65,8 +66,16 @@ impl Cli {
             return Ok(());
         }
 
-        // Require a command when not creating config
-        let command = self.command.ok_or_else(|| anyhow::anyhow!("A subcommand is required (use --help for more information)"))?;
+        // Require a command when not creating config, or print help and fail
+        let command = match self.command {
+            Some(cmd) => cmd,
+            None => {
+                use clap::CommandFactory;
+                let _ = Cli::command().print_help();
+                println!();
+                return Err(anyhow::anyhow!("A subcommand is required (use --help for more information)"));
+            }
+        };
 
         // Load configuration
         let core_config = CoreConfig::load_with_fallback(self.config.as_deref())?;

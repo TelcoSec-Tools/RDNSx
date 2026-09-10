@@ -47,12 +47,12 @@ impl DnsxClient {
 
         // Get IPv4 addresses
         if let Ok(ipv4s) = self.lookup_ipv4(domain).await {
-            ips.extend(ipv4s.into_iter().map(|ip| IpAddr::V4(ip)));
+            ips.extend(ipv4s.into_iter().map(IpAddr::V4));
         }
 
         // Get IPv6 addresses
         if let Ok(ipv6s) = self.lookup_ipv6(domain).await {
-            ips.extend(ipv6s.into_iter().map(|ip| IpAddr::V6(ip)));
+            ips.extend(ipv6s.into_iter().map(IpAddr::V6));
         }
 
         Ok(ips)

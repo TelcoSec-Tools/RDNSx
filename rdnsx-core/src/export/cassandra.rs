@@ -36,9 +36,9 @@ pub struct CassandraExporter {
     #[allow(dead_code)]
     prepared_statements: Arc<Mutex<HashMap<String, PreparedStatement>>>,
     /// Worker channels for concurrent processing
-    workers: Vec<JoinHandle<Result<()>>>,
+    workers: Arc<Mutex<Vec<JoinHandle<Result<()>>>>>,
     /// Record sender channels
-    record_senders: Vec<mpsc::UnboundedSender<DnsRecord>>,
+    record_senders: Arc<Mutex<Vec<mpsc::UnboundedSender<DnsRecord>>>>,
     /// Metrics for monitoring performance
     metrics: Arc<Mutex<CassandraMetrics>>,
     /// Configuration
@@ -158,8 +158,8 @@ impl CassandraExporter {
 
         Ok(Self {
             prepared_statements,
-            workers,
-            record_senders,
+            workers: Arc::new(Mutex::new(workers)),
+            record_senders: Arc::new(Mutex::new(record_senders)),
             metrics,
             config,
         })
@@ -262,7 +262,7 @@ impl CassandraExporter {
 
         // Get or create prepared statement
         let stmt_key = format!("{}.{}", config.keyspace, config.table);
-        let _prepared = {
+        let prepared = {
             let mut cache = prepared_statements.lock().await;
             if let Some(stmt) = cache.get(&stmt_key) {
                 stmt.clone()
@@ -283,7 +283,7 @@ impl CassandraExporter {
         };
 
         // Use Cassandra batch operations for better performance
-        let batch = Batch::default();
+        let mut batch = Batch::default();
         let mut values = Vec::new();
 
         for record in records {
@@ -295,7 +295,7 @@ impl CassandraExporter {
                 .map_err(|e| DnsxError::Other(format!("Invalid timestamp: {}", e)))?
                 .as_millis() as i64;
 
-            // batch.append_statement(&prepared); // Temporarily disabled due to API compatibility
+            batch.append_statement(prepared.clone());
             values.push((
                 record.domain.clone(),
                 record_type,
@@ -394,13 +394,16 @@ impl CassandraExporter {
 #[async_trait]
 impl Exporter for CassandraExporter {
     async fn export(&self, record: DnsRecord) -> Result<()> {
-        // Distribute records across workers using round-robin
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_WORKER: AtomicUsize = AtomicUsize::new(0);
 
-        let worker_index = NEXT_WORKER.fetch_add(1, Ordering::Relaxed) % self.record_senders.len();
+        let senders = self.record_senders.lock().await;
+        if senders.is_empty() {
+            return Err(DnsxError::Other("Cassandra exporter has already been flushed".to_string()));
+        }
 
-        self.record_senders[worker_index]
+        let worker_index = NEXT_WORKER.fetch_add(1, Ordering::Relaxed) % senders.len();
+        senders[worker_index]
             .send(record)
             .map_err(|e| DnsxError::Other(format!("Failed to send record to worker: {}", e)))?;
 
@@ -408,13 +411,20 @@ impl Exporter for CassandraExporter {
     }
 
     async fn flush(&self) -> Result<()> {
-        // Close all sender channels to signal workers to finish
-        drop(self.record_senders.clone()); // This will cause senders to be dropped
+        // Clear all sender channels so the channels close and workers finish rx.recv().await
+        {
+            let mut senders = self.record_senders.lock().await;
+            senders.clear();
+        }
 
         // Wait for all workers to complete
-        for (i, _worker) in self.workers.iter().enumerate() {
-            // match worker.await { // Temporarily disabled
-            match Ok::<Result<()>, DnsxError>(Ok(())) {
+        let handles = {
+            let mut workers = self.workers.lock().await;
+            std::mem::take(&mut *workers)
+        };
+
+        for (i, handle) in handles.into_iter().enumerate() {
+            match handle.await {
                 Ok(Ok(())) => debug!("Worker {} completed successfully", i),
                 Ok(Err(e)) => {
                     error!("Worker {} failed: {}", i, e);
@@ -451,9 +461,11 @@ impl Exporter for CassandraExporter {
 
 impl Drop for CassandraExporter {
     fn drop(&mut self) {
-        // Ensure all workers are aborted when the exporter is dropped
-        for worker in &self.workers {
-            worker.abort();
+        // Ensure all remaining workers are aborted when the exporter is dropped
+        if let Ok(workers) = self.workers.try_lock() {
+            for worker in workers.iter() {
+                worker.abort();
+            }
         }
     }
 }

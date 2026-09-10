@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Args;
 use tokio;
-use rdnsx_core::{DnsxClient, DnsEnumerator, RecordType, ResolverPool, parse_ip_range, reverse_ip};
+use rdnsx_core::{DnsxClient, DnsEnumerator, RecordType, ResolverPool, parse_ip_range_limited, reverse_ip};
 
 use crate::cli::Config;
 use crate::output_writer::OutputWriter;
@@ -26,7 +26,7 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
         concurrency: config.core_config.performance.threads,
         rate_limit: config.core_config.performance.rate_limit,
     };
-    let _client = DnsxClient::with_options(dns_options.clone())?;
+    let client = Arc::new(DnsxClient::with_options(dns_options.clone())?);
 
     // Create output writer
     let mut output = OutputWriter::new(config.output_file.clone(), config.json_output, config.silent)?;
@@ -55,23 +55,20 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
 
         // Convert prefixes to IP ranges, but limit to reasonable sizes
         let mut all_ips = Vec::new();
-        let mut total_ips = 0u64;
+        let max_total = 10000usize;
 
         for prefix in &asn_result.ipv4_prefixes {
-            match parse_ip_range(prefix) {
+            let remaining = max_total.saturating_sub(all_ips.len());
+            if remaining == 0 {
+                if !config.silent {
+                    eprintln!("⚠️  Limiting to 10,000 IPs total (ASN {} has many ranges)", args.input);
+                }
+                break;
+            }
+            let max_for_prefix = remaining.min(1000);
+            match parse_ip_range_limited(prefix, max_for_prefix) {
                 Ok(range_ips) => {
-                    // Limit each prefix to prevent excessive lookups
-                    let max_per_prefix = 1000; // Limit to 1000 IPs per prefix
-                    let limited_ips: Vec<_> = range_ips.into_iter().take(max_per_prefix).collect();
-                    total_ips += limited_ips.len() as u64;
-                    all_ips.extend(limited_ips);
-
-                    if total_ips >= 10000 { // Overall limit of 10,000 IPs
-                        if !config.silent {
-                            eprintln!("⚠️  Limiting to 10,000 IPs total (ASN {} has many ranges)", args.input);
-                        }
-                        break;
-                    }
+                    all_ips.extend(range_ips);
                 }
                 Err(e) => {
                     if !config.silent {
@@ -88,21 +85,10 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
         all_ips
     } else if args.input.contains('/') {
         // CIDR notation - add size limits
-        let range_ips = parse_ip_range(&args.input)
+        let max_ips = 10000;
+        let range_ips = parse_ip_range_limited(&args.input, max_ips)
             .map_err(|e| anyhow::anyhow!("Failed to parse IP range: {}", e))?;
-
-        // Limit large ranges to prevent excessive lookups
-        let max_ips = 10000; // 10,000 IP limit for CIDR ranges
-        if range_ips.len() > max_ips {
-            if !config.silent {
-                eprintln!("⚠️  Limiting {}/{} range to {} IPs (was {} total)",
-                         args.input, args.input.split('/').nth(1).unwrap_or(""),
-                         max_ips, range_ips.len());
-            }
-            range_ips.into_iter().take(max_ips).collect()
-        } else {
-            range_ips
-        }
+        range_ips
     } else {
         // Single IP address
         vec![args.input
@@ -134,14 +120,10 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
     for ip in ips {
         let permit = semaphore.clone().acquire_owned().await.unwrap();
         let ptr_domain = reverse_ip(&ip);
-        let options = dns_options.clone(); // Clone the options to create new client
+        let client_task = Arc::clone(&client);
 
         let task = tokio::spawn(async move {
-            // Create a new client for this task
-            let client_result = match DnsxClient::with_options(options) {
-                Ok(client) => client.query(&ptr_domain, RecordType::Ptr).await,
-                Err(e) => Err(e),
-            };
+            let client_result = client_task.query(&ptr_domain, RecordType::Ptr).await;
             drop(permit); // Release the permit
             (ip, ptr_domain, client_result)
         });

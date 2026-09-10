@@ -99,7 +99,6 @@ impl Bruteforcer {
         for subdomain in subdomains {
             let client = Arc::clone(&self.client);
             let permit = semaphore.clone();
-            let record_type = record_type;
 
             let handle = tokio::spawn(async move {
                 let _permit = permit.acquire().await.ok();

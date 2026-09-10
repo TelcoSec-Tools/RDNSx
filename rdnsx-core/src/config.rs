@@ -53,7 +53,7 @@ impl Default for DnsxOptions {
 }
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     /// DNS resolver configuration
     #[serde(default)]
@@ -66,16 +66,6 @@ pub struct Config {
     /// Export configuration
     #[serde(default)]
     pub export: ExportConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            resolvers: ResolverConfig::default(),
-            performance: PerformanceConfig::default(),
-            export: ExportConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

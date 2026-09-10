@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use futures::stream::{self, StreamExt};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
-use tracing::{debug, warn, info};
+use tracing::{info, warn};
 
 use crate::error::{DnsxError, Result};
 use crate::types::DnsRecord;
@@ -188,11 +188,10 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter
     pub fn new(requests_per_second: u64) -> Self {
-        let interval = if requests_per_second > 0 {
-            Duration::from_micros(1_000_000 / requests_per_second)
-        } else {
-            Duration::from_micros(0)
-        };
+        let interval = 1_000_000u64
+            .checked_div(requests_per_second)
+            .map(Duration::from_micros)
+            .unwrap_or(Duration::from_micros(0));
 
         Self {
             interval,
@@ -200,22 +199,27 @@ impl RateLimiter {
         }
     }
 
-    /// Wait until the next request can be made
+    /// Wait until the next request can be made without holding lock across await
     pub async fn wait(&self) {
         if self.interval.as_micros() == 0 {
             return;
         }
 
-        let mut last_request = self.last_request.lock().unwrap();
-        let now = Instant::now();
-        let elapsed = now.duration_since(*last_request);
+        let sleep_duration = {
+            let mut last_request = self.last_request.lock().unwrap();
+            let now = Instant::now();
+            let scheduled = if *last_request > now {
+                *last_request + self.interval
+            } else {
+                now + self.interval
+            };
+            *last_request = scheduled;
+            scheduled.saturating_duration_since(now)
+        };
 
-        if elapsed < self.interval {
-            let sleep_duration = self.interval - elapsed;
+        if !sleep_duration.is_zero() {
             tokio::time::sleep(sleep_duration).await;
         }
-
-        *last_request = Instant::now();
     }
 }
 

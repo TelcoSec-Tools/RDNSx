@@ -7,8 +7,10 @@ use crate::error::{DnsxError, Result};
 use crate::resolver::ResolverPool;
 use crate::types::RecordType;
 
+use serde::{Deserialize, Serialize};
+
 /// Results from DNSSEC enumeration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnssecEnumerationResult {
     pub domain: String,
     pub dnssec_enabled: bool,
@@ -22,7 +24,7 @@ pub struct DnssecEnumerationResult {
 }
 
 /// DNSKEY record information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnskeyInfo {
     pub key_tag: u16,
     pub algorithm: u8,
@@ -33,7 +35,7 @@ pub struct DnskeyInfo {
 }
 
 /// DS record information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DsInfo {
     pub key_tag: u16,
     pub algorithm: u8,
@@ -43,7 +45,7 @@ pub struct DsInfo {
 }
 
 /// Results from DNSSEC zone walking
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZoneWalkingResult {
     pub domain: String,
     pub discovered_names: Vec<String>,
@@ -53,7 +55,7 @@ pub struct ZoneWalkingResult {
 }
 
 /// NSEC record information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NsecRecord {
     pub owner: String,
     pub next_domain: String,
@@ -88,59 +90,79 @@ impl DnssecAnalyzer {
         };
 
         // Check for DNSKEY records (indicates DNSSEC)
-        // DNSKEY parsing not supported in this hickory version
-        // if let Ok((lookup, resolver_addr)) = self.resolver_pool.query(domain, RecordType::Dnskey).await {
-        //     for rdata in lookup.iter() {
-        //         if let hickory_resolver::proto::rr::RData::DNSKEY(dnskey) = rdata {
-        //             result.dnssec_enabled = true;
-        //             let key_type = self.analyze_dnskey_flags(dnskey.flags());
-        //             result.dnskey_records.push(DnskeyInfo {
-        //                 key_tag: dnskey.calculate_key_tag().unwrap_or(0),
-        //                 algorithm: dnskey.algorithm().into(),
-        //                 flags: dnskey.flags(),
-        //                 protocol: dnskey.protocol(),
-        //                 resolver: resolver_addr.clone(),
-        //                 key_type,
-        //             });
-        //         }
-        //     }
-        // }
+        if let Ok((lookup, resolver_addr)) = self.resolver_pool.query(domain, RecordType::Dnskey).await {
+            for rdata in lookup.iter() {
+                if let hickory_resolver::proto::rr::RData::DNSSEC(hickory_resolver::proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(dnskey)) = rdata {
+                    result.dnssec_enabled = true;
+                    let key_type = self.analyze_dnskey_flags(dnskey.flags());
+                    result.dnskey_records.push(DnskeyInfo {
+                        key_tag: dnskey.calculate_key_tag().unwrap_or(0),
+                        algorithm: u8::from(dnskey.algorithm()),
+                        flags: dnskey.flags(),
+                        protocol: 3,
+                        resolver: resolver_addr.clone(),
+                        key_type,
+                    });
+                }
+            }
+        }
 
         // Check for DS records
-        // DS parsing not supported in this hickory version
-        // if let Ok((lookup, resolver_addr)) = self.resolver_pool.query(domain, RecordType::Ds).await {
-        //     for rdata in lookup.iter() {
-        //         if let hickory_resolver::proto::rr::RData::DS(ds) = rdata {
-        //             result.ds_records.push(DsInfo {
-        //                 key_tag: ds.key_tag(),
-        //                 algorithm: ds.algorithm().into(),
-        //                 digest_type: ds.digest_type().into(),
-        //                 digest: hex::encode(ds.digest()),
-        //                 resolver: resolver_addr.clone(),
-        //             });
-        //         }
-        //     }
-        // }
+        if let Ok((lookup, resolver_addr)) = self.resolver_pool.query(domain, RecordType::Ds).await {
+            for rdata in lookup.iter() {
+                if let hickory_resolver::proto::rr::RData::DNSSEC(hickory_resolver::proto::rr::dnssec::rdata::DNSSECRData::DS(ds)) = rdata {
+                    result.dnssec_enabled = true;
+                    result.ds_records.push(DsInfo {
+                        key_tag: ds.key_tag(),
+                        algorithm: u8::from(ds.algorithm()),
+                        digest_type: u8::from(ds.digest_type()),
+                        digest: hex::encode(ds.digest()),
+                        resolver: resolver_addr.clone(),
+                    });
+                }
+            }
+        }
 
         // Check for RRSIG records
         if let Ok((lookup, _)) = self.resolver_pool.query(domain, RecordType::Rrsig).await {
-            result.rrsig_records = lookup.iter().count();
+            let count = lookup.iter().count();
+            if count > 0 {
+                result.dnssec_enabled = true;
+                result.rrsig_records = count;
+            }
         }
 
         // Check for NSEC records (DNSSEC proof of non-existence)
         if let Ok((lookup, _)) = self.resolver_pool.query(domain, RecordType::Nsec).await {
-            result.nsec_records = lookup.iter().count();
+            let count = lookup.iter().count();
+            if count > 0 {
+                result.dnssec_enabled = true;
+                result.nsec_records = count;
+            }
         }
 
         // Check for NSEC3 records
         if let Ok((lookup, _)) = self.resolver_pool.query(domain, RecordType::Nsec3).await {
-            result.nsec3_records = lookup.iter().count();
+            let count = lookup.iter().count();
+            if count > 0 {
+                result.dnssec_enabled = true;
+                result.nsec3_records = count;
+            }
         }
 
         // Analyze security issues and generate recommendations
         self.analyze_dnssec_security(&mut result);
 
         Ok(result)
+    }
+
+    /// Analyze DNSKEY flags to identify key role (ZSK vs KSK)
+    fn analyze_dnskey_flags(&self, flags: u16) -> String {
+        match flags {
+            256 => "ZSK (Zone Signing Key)".to_string(),
+            257 => "KSK (Key Signing Key)".to_string(),
+            _ => format!("Flags ({})", flags),
+        }
     }
 
 
@@ -213,34 +235,51 @@ impl DnssecAnalyzer {
             warn!("NSEC3 detected - zone walking is more difficult with NSEC3");
             result.enumeration_successful = false;
         } else {
-            // Try to find a non-existent subdomain to get NSEC records
-            let _test_subdomain = format!("nonexistent-{}.{}", rand::random::<u32>(), domain);
+            let mut current_name = domain.to_string();
+            let mut visited = std::collections::HashSet::new();
 
-            // NSEC zone walking not supported in this hickory version
-            // if let Ok((lookup, _)) = self.resolver_pool.query(&test_subdomain, RecordType::Nsec).await {
-            //     for rdata in lookup.iter() {
-            //         if let hickory_resolver::proto::rr::RData::NSEC(nsec) = rdata {
-            //             let next_name = nsec.next_domain_name().to_string();
+            for _ in 0..25 {
+                if visited.contains(&current_name) {
+                    break;
+                }
+                visited.insert(current_name.clone());
 
-            //             // Extract record types from NSEC
-            //             let mut types = Vec::new();
-            //             for record_type in nsec.type_bit_maps() {
-            //                 types.push(format!("{}", record_type));
-            //             }
+                let test_subdomain = format!("000-nonexistent-{}.{}", rand::random::<u16>(), current_name);
+                if let Ok((lookup, _)) = self.resolver_pool.query(&test_subdomain, RecordType::Nsec).await {
+                    let mut found_next = false;
+                    for rdata in lookup.iter() {
+                        if let hickory_resolver::proto::rr::RData::DNSSEC(hickory_resolver::proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec)) = rdata {
+                            let next_name = nsec.next_domain_name().to_string();
+                            let mut types = Vec::new();
+                            for record_type in nsec.type_bit_maps() {
+                                types.push(format!("{}", record_type));
+                            }
 
-            //             result.nsec_chain.push(NsecRecord {
-            //                 owner: test_subdomain.clone(),
-            //                 next_domain: next_name,
-            //                 types,
-            //             });
+                            result.nsec_chain.push(NsecRecord {
+                                owner: current_name.clone(),
+                                next_domain: next_name.clone(),
+                                types,
+                            });
 
-            //             // Basic zone walking (simplified)
-            //             // In practice, you'd follow the NSEC chain to enumerate all names
-            //             result.enumeration_successful = true;
-            //             result.total_names_found = 1; // Simplified
-            //         }
-            //     }
-            // }
+                            if !result.discovered_names.contains(&next_name) {
+                                result.discovered_names.push(next_name.clone());
+                            }
+
+                            current_name = next_name.trim_end_matches('.').to_string();
+                            found_next = true;
+                            break;
+                        }
+                    }
+                    if !found_next {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            result.enumeration_successful = !result.nsec_chain.is_empty();
+            result.total_names_found = result.discovered_names.len();
         }
 
         Ok(result)

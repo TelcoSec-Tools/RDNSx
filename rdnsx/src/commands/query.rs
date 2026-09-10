@@ -355,9 +355,9 @@ pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
     });
 
     // Process domains concurrently with adaptive batching
-    let (all_records, metrics) = if use_streaming && args.list.is_some() {
+    let (all_records, metrics) = if let (true, Some(list_path)) = (use_streaming, args.list.as_ref()) {
         // Streaming mode for large files with adaptive batching
-        let file = std::fs::File::open(args.list.as_ref().unwrap())?;
+        let file = std::fs::File::open(list_path)?;
         let reader = std::io::BufReader::new(file);
         let streamer = DomainStreamer::new(reader);
 

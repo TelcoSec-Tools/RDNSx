@@ -7,7 +7,7 @@ Thank you for your interest in contributing to RDNSx! We welcome contributions f
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/Quinas-Project/RDNSx.git
+   git clone https://github.com/TelcoSec-Tools/RDNSx.git
    cd rdnsx
    ```
 

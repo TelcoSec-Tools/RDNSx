@@ -7,8 +7,10 @@ use crate::error::Result;
 use crate::resolver::ResolverPool;
 use crate::types::RecordType;
 
+use serde::{Deserialize, Serialize};
+
 /// Results from email security enumeration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailSecurityResult {
     pub domain: String,
     pub spf_records: Vec<SpfRecord>,
@@ -17,21 +19,21 @@ pub struct EmailSecurityResult {
 }
 
 /// SPF record information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpfRecord {
     pub content: String,
     pub resolver: String,
 }
 
 /// DMARC record information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DmarcRecord {
     pub content: String,
     pub resolver: String,
 }
 
 /// DKIM selector information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DkimSelector {
     pub selector: String,
     pub record: String,
@@ -149,8 +151,8 @@ impl EmailSecurityEnumerator {
         let mechanisms: Vec<&str> = spf_record.split_whitespace().collect();
 
         for mechanism in mechanisms.iter().skip(1) { // Skip "v=spf1"
-            if mechanism.starts_with("include:") {
-                analysis.includes.push(mechanism[8..].to_string());
+            if let Some(inc) = mechanism.strip_prefix("include:") {
+                analysis.includes.push(inc.to_string());
             } else if mechanism.starts_with("+all") || mechanism.starts_with("-all") ||
                       mechanism.starts_with("~all") || mechanism.starts_with("?all") {
                 analysis.has_all = true;

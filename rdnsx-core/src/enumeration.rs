@@ -120,6 +120,7 @@ impl DnsEnumerator {
         info!("Performing passive DNS enumeration for: {}", domain);
 
         let sources: Vec<Box<dyn PassiveDnsSource>> = vec![
+            Box::new(CrtShSource),
             Box::new(LocalResolutionSource::new(self.resolver_pool.clone())),
         ];
 
@@ -136,7 +137,7 @@ impl DnsEnumerator {
                 combined_result.subdomains.extend(result.subdomains);
                 combined_result.historical_ips.extend(result.historical_ips);
                 combined_result.data_sources.push(source.name().to_string());
-                
+
                 if let Some(source_last_seen) = result.last_seen {
                     if combined_result.last_seen.is_none() || Some(source_last_seen) > combined_result.last_seen {
                         combined_result.last_seen = Some(source_last_seen);
@@ -144,6 +145,10 @@ impl DnsEnumerator {
                 }
             }
         }
+
+        // Deduplicate subdomains by name
+        let mut seen = std::collections::HashSet::new();
+        combined_result.subdomains.retain(|sub| seen.insert(sub.name.clone()));
 
         Ok(combined_result)
     }
@@ -188,78 +193,24 @@ impl DnsEnumerator {
 
     /// Enumerate ASN information and associated IP ranges
     pub async fn asn_enumeration(&self, asn: &str) -> Result<crate::enumeration_types::AsnEnumerationResult> {
-        use crate::enumeration_types::AsnEnumerationResult;
-
         info!("Enumerating ASN: {}", asn);
 
         let clean_asn = asn.trim_start_matches("AS").trim_start_matches("as");
 
-        // For now, use a simple mock implementation that provides basic ASN info
-        // This is a temporary workaround until the HTTP client issues are resolved
-        info!("Using offline ASN enumeration mode (limited data available)");
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| DnsxError::Other(format!("Failed to create HTTP client: {}", e)))?;
 
-        let mut result = AsnEnumerationResult {
-            asn: format!("AS{}", clean_asn),
-            name: Some("Unknown (Offline Mode)".to_string()),
-            description: Some("ASN enumeration is running in offline mode due to network connectivity issues".to_string()),
-            country: None,
-            ipv4_prefixes: vec!["192.0.2.0/24".to_string()], // RFC 5737 test address
-            ipv6_prefixes: vec!["2001:db8::/32".to_string()], // RFC 3849 test address
-            total_ipv4_addresses: 256,
-            total_ipv6_addresses: 18446744073709551615, // Max u64 value as approximation for IPv6
-        };
-
-        // Try to get basic info from known ASNs
-        match clean_asn {
-            "15169" => {
-                result.name = Some("Google LLC".to_string());
-                result.description = Some("Google LLC".to_string());
-                result.country = Some("US".to_string());
-                result.ipv4_prefixes = vec![
-                    "8.8.8.0/24".to_string(),
-                    "8.8.4.0/24".to_string(),
-                    "8.34.208.0/20".to_string(),
-                ];
-                result.ipv6_prefixes = vec![
-                    "2001:4860::/32".to_string(),
-                    "2607:f8b0::/32".to_string(),
-                ];
-                result.total_ipv4_addresses = 8454144;
-                result.total_ipv6_addresses = 18446744073709551615; // Max u64 value as approximation
-            }
-            "16509" => {
-                result.name = Some("Amazon.com, Inc.".to_string());
-                result.description = Some("Amazon Web Services".to_string());
-                result.country = Some("US".to_string());
-                result.ipv4_prefixes = vec![
-                    "52.0.0.0/11".to_string(),
-                    "54.0.0.0/8".to_string(),
-                ];
-                result.ipv6_prefixes = vec!["2600:1f00::/24".to_string()];
-                result.total_ipv4_addresses = 20000000; // Approximate
-            }
-            "13335" => {
-                result.name = Some("Cloudflare, Inc.".to_string());
-                result.description = Some("Cloudflare, Inc.".to_string());
-                result.country = Some("US".to_string());
-                result.ipv4_prefixes = vec![
-                    "173.245.48.0/20".to_string(),
-                    "103.21.244.0/22".to_string(),
-                ];
-                result.ipv6_prefixes = vec![
-                    "2400:cb00::/32".to_string(),
-                    "2606:4700::/32".to_string(),
-                ];
-                result.total_ipv4_addresses = 30000000; // Approximate
-            }
-            _ => {
-                // For unknown ASNs, provide minimal info
-                result.name = Some(format!("ASN {} (Unknown)", clean_asn));
-                result.description = Some("ASN information not available in offline mode".to_string());
+        let url = format!("https://api.bgpview.io/asn/{}", clean_asn);
+        match Self::try_asn_api(&client, &url, "BGPView", clean_asn).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                info!("BGPView failed ({}), trying IPInfo fallback", e);
+                let ipinfo_url = format!("https://ipinfo.io/AS{}/json", clean_asn);
+                Self::try_asn_api(&client, &ipinfo_url, "IPInfo", clean_asn).await
             }
         }
-
-        Ok(result)
     }
 
     /// Try to fetch ASN data from a specific API
@@ -267,7 +218,7 @@ impl DnsEnumerator {
     async fn try_asn_api(client: &reqwest::Client, url: &str, api_name: &str, asn: &str) -> Result<AsnEnumerationResult> {
         // First try with reqwest
         match Self::try_reqwest_api(client, url, api_name, asn).await {
-            Ok(result) => return Ok(result),
+            Ok(result) => Ok(result),
             Err(reqwest_error) => {
                 info!("reqwest failed for {} API: {}, trying ureq fallback", api_name, reqwest_error);
                 // Fallback to ureq
@@ -444,7 +395,7 @@ impl PassiveDnsSource for LocalResolutionSource {
     }
 
     async fn lookup(&self, domain: &str) -> Result<crate::enumeration_types::PassiveDnsResult> {
-        use crate::enumeration_types::{PassiveDnsResult, PassiveSubdomain, HistoricalIp};
+        use crate::enumeration_types::{PassiveDnsResult, PassiveSubdomain};
         
         let mut result = PassiveDnsResult {
             domain: domain.to_string(),
@@ -464,7 +415,7 @@ impl PassiveDnsSource for LocalResolutionSource {
                     result.subdomains.push(PassiveSubdomain {
                         name: subdomain,
                         record_type: "A".to_string(),
-                        first_seen: chrono::Utc::now() - chrono::Duration::days(365),
+                        first_seen: chrono::Utc::now(),
                         last_seen: chrono::Utc::now(),
                         source: self.name().to_string(),
                     });
@@ -472,13 +423,59 @@ impl PassiveDnsSource for LocalResolutionSource {
             }
         }
 
-        // Simulate historical IP for demonstration
-        if !result.subdomains.is_empty() {
-            result.historical_ips.push(HistoricalIp {
-                ip: "192.0.2.1".parse().unwrap(),
-                first_seen: chrono::Utc::now() - chrono::Duration::days(365),
-                last_seen: chrono::Utc::now(),
-            });
+        Ok(result)
+    }
+}
+
+/// Certificate Transparency (crt.sh) passive source
+pub struct CrtShSource;
+
+#[async_trait::async_trait]
+impl PassiveDnsSource for CrtShSource {
+    fn name(&self) -> &str {
+        "crt.sh"
+    }
+
+    async fn lookup(&self, domain: &str) -> Result<crate::enumeration_types::PassiveDnsResult> {
+        use crate::enumeration_types::{PassiveDnsResult, PassiveSubdomain};
+
+        let mut result = PassiveDnsResult {
+            domain: domain.to_string(),
+            subdomains: Vec::new(),
+            historical_ips: Vec::new(),
+            last_seen: Some(chrono::Utc::now()),
+            data_sources: vec![self.name().to_string()],
+        };
+
+        let url = format!("https://crt.sh/?q=%25.{}&output=json", domain);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| DnsxError::Other(e.to_string()))?;
+
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(entries) = resp.json::<Vec<serde_json::Value>>().await {
+                    let mut seen = std::collections::HashSet::new();
+                    for entry in entries {
+                        if let Some(name_value) = entry.get("name_value").and_then(|n| n.as_str()) {
+                            for name in name_value.split('\n') {
+                                let clean = name.trim().trim_start_matches("*.").to_lowercase();
+                                let is_subdomain = clean == domain || clean.ends_with(&format!(".{}", domain));
+                                if is_subdomain && seen.insert(clean.clone()) {
+                                    result.subdomains.push(PassiveSubdomain {
+                                        name: clean,
+                                        record_type: "A".to_string(),
+                                        first_seen: chrono::Utc::now(),
+                                        last_seen: chrono::Utc::now(),
+                                        source: self.name().to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(result)

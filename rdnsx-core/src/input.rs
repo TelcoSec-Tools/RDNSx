@@ -72,20 +72,21 @@ pub fn read_wordlist(source: &str) -> Result<Vec<String>> {
     }
 }
 
-/// Parse IP network range (CIDR) into individual IPs
-pub fn parse_ip_range(range: &str) -> Result<Vec<std::net::IpAddr>> {
+/// Parse IP network range (CIDR) into individual IPs with a maximum count limit
+pub fn parse_ip_range_limited(range: &str, max_ips: usize) -> Result<Vec<std::net::IpAddr>> {
     use ipnetwork::IpNetwork;
-    
+
     let network: IpNetwork = range
         .parse()
         .map_err(|e| DnsxError::invalid_input(format!("Invalid IP range {}: {}", range, e)))?;
-    
-    let mut ips = Vec::new();
-    for ip in network.iter() {
-        ips.push(ip);
-    }
-    
+
+    let ips: Vec<std::net::IpAddr> = network.iter().take(max_ips).collect();
     Ok(ips)
+}
+
+/// Parse IP network range (CIDR) into individual IPs (capped at 65536 to prevent OOM)
+pub fn parse_ip_range(range: &str) -> Result<Vec<std::net::IpAddr>> {
+    parse_ip_range_limited(range, 65536)
 }
 
 /// Parse ASN format (AS12345)
