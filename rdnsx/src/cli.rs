@@ -28,12 +28,31 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Silent mode (minimal output)
+    /// Hide the banner and progress messages (results are still printed)
     #[arg(long, global = true)]
     pub silent: bool,
 
+    /// Query timeout in seconds (overrides the config file)
+    #[arg(long, global = true)]
+    pub timeout: Option<u64>,
+
+    /// Resolvers to use, comma-separated (overrides the config file)
+    #[arg(short = 'r', long, global = true, value_delimiter = ',')]
+    pub resolvers: Option<Vec<String>>,
+
+    /// Maximum queries per second, 0 for unlimited (overrides the config file)
+    #[arg(long, global = true)]
+    pub rate_limit: Option<u64>,
+
+    /// Number of concurrent queries (overrides the config file)
+    #[arg(long, global = true)]
+    pub threads: Option<usize>,
+
     /// Create example configuration file and exit
-    #[arg(long, help = "Create an example configuration file at the specified path")]
+    #[arg(
+        long,
+        help = "Create an example configuration file at the specified path"
+    )]
     pub create_config: Option<PathBuf>,
 }
 
@@ -73,12 +92,26 @@ impl Cli {
                 use clap::CommandFactory;
                 let _ = Cli::command().print_help();
                 println!();
-                return Err(anyhow::anyhow!("A subcommand is required (use --help for more information)"));
+                return Err(anyhow::anyhow!(
+                    "A subcommand is required (use --help for more information)"
+                ));
             }
         };
 
         // Load configuration
-        let core_config = CoreConfig::load_with_fallback(self.config.as_deref())?;
+        let mut core_config = CoreConfig::load_with_fallback(self.config.as_deref())?;
+        if let Some(timeout) = self.timeout {
+            core_config.resolvers.timeout = timeout;
+        }
+        if let Some(resolvers) = self.resolvers {
+            core_config.resolvers.servers = resolvers;
+        }
+        if let Some(rate_limit) = self.rate_limit {
+            core_config.performance.rate_limit = rate_limit;
+        }
+        if let Some(threads) = self.threads {
+            core_config.performance.threads = threads.max(1);
+        }
 
         // Override config with CLI arguments
         let config = Config {

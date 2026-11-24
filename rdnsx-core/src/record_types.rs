@@ -99,6 +99,11 @@ impl RecordType {
         ]
     }
 
+    /// Convert from a hickory-dns RecordType, if it is one we model
+    pub fn from_hickory(rtype: hickory_resolver::proto::rr::RecordType) -> Option<RecordType> {
+        Self::all().into_iter().find(|t| t.to_hickory() == rtype)
+    }
+
     /// Convert to hickory-dns RecordType
     pub fn to_hickory(&self) -> hickory_resolver::proto::rr::RecordType {
         use hickory_resolver::proto::rr::RecordType as HRecordType;

@@ -3,18 +3,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tokio::sync::Semaphore;
+use futures::stream::{self, StreamExt};
 use tracing::debug;
 
 use crate::client::DnsxClient;
 use crate::error::Result;
 use crate::input::read_wordlist;
-use crate::types::RecordType;
+use crate::types::{DnsRecord, RecordType};
+use crate::wildcard::WildcardFilter;
 
 /// Subdomain bruteforcer
 pub struct Bruteforcer {
     client: Arc<DnsxClient>,
     concurrency: usize,
+    wildcard_filter: Option<WildcardFilter>,
 }
 
 impl Bruteforcer {
@@ -22,103 +24,109 @@ impl Bruteforcer {
     pub fn new(client: Arc<DnsxClient>, concurrency: usize) -> Self {
         Self {
             client,
-            concurrency,
+            concurrency: concurrency.max(1),
+            wildcard_filter: None,
         }
+    }
+
+    /// Drop results that are only answered by a wildcard record
+    pub fn with_wildcard_filter(mut self, filter: WildcardFilter) -> Self {
+        self.wildcard_filter = Some(filter);
+        self
     }
 
     /// Generate subdomain candidates from wordlist and domain
     fn generate_subdomains(domain: &str, words: Vec<String>, placeholder: &str) -> Vec<String> {
-        let mut subdomains = Vec::new();
-
-        for word in words {
-            let subdomain = if domain.contains(placeholder) {
-                domain.replace(placeholder, &word)
-            } else {
-                format!("{}.{}", word.trim(), domain)
-            };
-            debug!("Generated subdomain: {} -> {}", word.trim(), subdomain);
-            subdomains.push(subdomain);
-        }
-
-        subdomains
+        let mut seen = HashSet::new();
+        words
+            .into_iter()
+            .map(|word| {
+                let word = word.trim().to_string();
+                if domain.contains(placeholder) {
+                    domain.replace(placeholder, &word)
+                } else {
+                    format!("{}.{}", word, domain)
+                }
+            })
+            .filter(|candidate| seen.insert(candidate.clone()))
+            .collect()
     }
 
-    /// Enumerate subdomains for a domain using a wordlist
+    /// Enumerate subdomains for a domain using a wordlist (A records)
     pub async fn enumerate(
         &self,
         domain: &str,
         wordlist_source: &str,
         placeholder: &str,
     ) -> Result<Vec<String>> {
-        // Read wordlist
-        let words = read_wordlist(wordlist_source)?;
-        debug!("Loaded {} words from wordlist", words.len());
-
-        // Generate subdomain candidates
-        let subdomains = Self::generate_subdomains(domain, words, placeholder);
-        debug!("Generated {} subdomain candidates", subdomains.len());
-
-        // Query subdomains sequentially for now (to avoid complexity)
-        let mut found = Vec::new();
-
-        for subdomain in subdomains {
-            match self.client.lookup_ipv4(&subdomain).await {
-                Ok(ips) if !ips.is_empty() => {
-                    debug!("Found subdomain: {}", subdomain);
-                    found.push(subdomain);
-                }
-                _ => {} // Subdomain doesn't exist or failed to resolve
-            }
-        }
-
-        // Deduplicate
-        let unique: HashSet<String> = HashSet::from_iter(found);
-        Ok(unique.into_iter().collect())
+        Ok(self
+            .enumerate_with_records(domain, wordlist_source, placeholder, RecordType::A)
+            .await?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect())
     }
 
-    /// Enumerate subdomains and return all DNS records found
+    /// Enumerate subdomains and return all DNS records found.
+    ///
+    /// Candidates are resolved with at most `concurrency` queries in flight, so
+    /// memory stays flat regardless of wordlist size.
     pub async fn enumerate_with_records(
         &self,
         domain: &str,
         wordlist_source: &str,
         placeholder: &str,
         record_type: RecordType,
-    ) -> Result<Vec<(String, Vec<crate::types::DnsRecord>)>> {
-        // Read wordlist
+    ) -> Result<Vec<(String, Vec<DnsRecord>)>> {
         let words = read_wordlist(wordlist_source)?;
         debug!("Loaded {} words from wordlist", words.len());
 
-        // Generate subdomain candidates
         let subdomains = Self::generate_subdomains(domain, words, placeholder);
         debug!("Generated {} subdomain candidates", subdomains.len());
 
-        // Query subdomains concurrently
-        let semaphore = Arc::new(Semaphore::new(self.concurrency));
-        let mut handles = Vec::new();
+        let client = &self.client;
+        let filter = self.wildcard_filter.as_ref();
 
-        for subdomain in subdomains {
-            let client = Arc::clone(&self.client);
-            let permit = semaphore.clone();
-
-            let handle = tokio::spawn(async move {
-                let _permit = permit.acquire().await.ok();
-                match client.query(&subdomain, record_type).await {
-                    Ok(records) if !records.is_empty() => Some((subdomain, records)),
-                    _ => None,
+        let found: Vec<(String, Vec<DnsRecord>)> = stream::iter(subdomains)
+            .map(|subdomain| async move {
+                let records = match client.query(&subdomain, record_type).await {
+                    Ok(records) if !records.is_empty() => records,
+                    _ => return None,
+                };
+                let records = match filter {
+                    Some(filter) => filter.filter_by_ip(records).await.ok()?,
+                    None => records,
+                };
+                if records.is_empty() {
+                    None
+                } else {
+                    Some((subdomain, records))
                 }
-            });
-
-            handles.push(handle);
-        }
-
-        // Collect results
-        let mut found = Vec::new();
-        for handle in handles {
-            if let Ok(Some(result)) = handle.await {
-                found.push(result);
-            }
-        }
+            })
+            .buffer_unordered(self.concurrency)
+            .filter_map(|result| async move { result })
+            .collect()
+            .await;
 
         Ok(found)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generates_and_deduplicates_candidates() {
+        let words = vec!["www".to_string(), " api ".to_string(), "www".to_string()];
+        let subs = Bruteforcer::generate_subdomains("example.com", words, "FUZZ");
+        assert_eq!(subs, vec!["www.example.com", "api.example.com"]);
+    }
+
+    #[test]
+    fn replaces_placeholder() {
+        let words = vec!["dev".to_string()];
+        let subs = Bruteforcer::generate_subdomains("FUZZ.internal.example.com", words, "FUZZ");
+        assert_eq!(subs, vec!["dev.internal.example.com"]);
     }
 }

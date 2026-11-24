@@ -1,7 +1,7 @@
 //! Input handling for domains, IP ranges, and wordlists
 
-use std::io::{self, BufRead};
 use std::fs::File;
+use std::io::{self, BufRead};
 use std::path::Path;
 
 use crate::error::{DnsxError, Result};
@@ -37,9 +37,10 @@ pub fn read_domains(source: InputSource) -> Result<Vec<String>> {
                 .map_err(|e| DnsxError::Other(format!("Failed to read file {}: {}", path, e)))?;
             Ok(lines.into_iter().filter(|s| !s.trim().is_empty()).collect())
         }
-        InputSource::Args(domains) => {
-            Ok(domains.into_iter().filter(|s| !s.trim().is_empty()).collect())
-        }
+        InputSource::Args(domains) => Ok(domains
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect()),
     }
 }
 
@@ -56,16 +57,23 @@ pub fn read_wordlist(source: &str) -> Result<Vec<String>> {
         Ok(lines.into_iter().filter(|s| !s.trim().is_empty()).collect())
     } else if Path::new(source).exists() {
         // Read from file
-        let file = File::open(source)
-            .map_err(|e| DnsxError::Other(format!("Failed to open wordlist file {}: {}", source, e)))?;
+        let file = File::open(source).map_err(|e| {
+            DnsxError::Other(format!("Failed to open wordlist file {}: {}", source, e))
+        })?;
         let lines: Vec<String> = io::BufReader::new(file)
             .lines()
             .collect::<io::Result<Vec<String>>>()
-            .map_err(|e| DnsxError::Other(format!("Failed to read wordlist file {}: {}", source, e)))?;
+            .map_err(|e| {
+                DnsxError::Other(format!("Failed to read wordlist file {}: {}", source, e))
+            })?;
         Ok(lines.into_iter().filter(|s| !s.trim().is_empty()).collect())
     } else if source.contains(',') {
         // Comma-separated words
-        Ok(source.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        Ok(source
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect())
     } else {
         // Single word
         Ok(vec![source.to_string()])
@@ -109,7 +117,10 @@ pub fn reverse_ip(ip: &std::net::IpAddr) -> String {
     match ip {
         std::net::IpAddr::V4(ipv4) => {
             let octets = ipv4.octets();
-            format!("{}.{}.{}.{}.in-addr.arpa", octets[3], octets[2], octets[1], octets[0])
+            format!(
+                "{}.{}.{}.{}.in-addr.arpa",
+                octets[3], octets[2], octets[1], octets[0]
+            )
         }
         std::net::IpAddr::V6(ipv6) => {
             // Convert IPv6 to reverse DNS format

@@ -63,7 +63,7 @@ cd RDNSx && cargo build --release
 **Yes!** RDNSx supports Windows, Linux, and macOS. Use the same installation commands - Rust's Cargo handles platform-specific compilation automatically.
 
 ### Do I need Rust installed to use RDNSx?
-**Only for source installation**. Pre-built binaries are available for download, but if you're building from source or installing via `cargo install`, you'll need Rust 1.70+.
+**Only for source installation**. Pre-built binaries are available for download, but if you're building from source or installing via `cargo install`, you'll need Rust 1.94+.
 
 ### How do I verify RDNSx installation?
 ```bash

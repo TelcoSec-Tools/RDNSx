@@ -9,7 +9,8 @@ use parking_lot::RwLock;
 use tracing::debug;
 
 use crate::error::Result;
-use crate::types::{DnsRecord, RecordType};
+use crate::query::QueryResponse;
+use crate::types::{DnsRecord, RecordType, ResponseCode};
 
 /// Cache key combining domain and record type
 #[derive(Debug, Clone, Eq)]
@@ -44,6 +45,7 @@ impl PartialEq for CacheKey {
 #[derive(Debug, Clone)]
 pub struct CachedResponse {
     pub records: Vec<DnsRecord>,
+    pub response_code: ResponseCode,
     pub cached_at: Instant,
     pub ttl: Duration,
 }
@@ -52,6 +54,7 @@ impl CachedResponse {
     pub fn new(records: Vec<DnsRecord>, ttl: Duration) -> Self {
         Self {
             records,
+            response_code: ResponseCode::NoError,
             cached_at: Instant::now(),
             ttl,
         }
@@ -89,26 +92,40 @@ impl DnsCache {
         }
     }
 
-    /// Get a cached response if it exists and is still valid
+    /// Get cached records if they exist and are still valid
     pub fn get(&self, key: &CacheKey) -> Option<Vec<DnsRecord>> {
+        self.get_with_rcode(key).map(|(records, _)| records)
+    }
+
+    /// Get cached records and response code if they exist and are still valid
+    pub fn get_with_rcode(&self, key: &CacheKey) -> Option<(Vec<DnsRecord>, ResponseCode)> {
         let cache = self.cache.read();
 
-        if let Some(cached) = cache.get(key) {
-            if cached.is_valid() {
+        match cache.get(key) {
+            Some(cached) if cached.is_valid() => {
                 debug!("Cache hit for {} {:?}", key.domain, key.record_type);
-                Some(cached.records.clone())
-            } else {
-                None // Expired, will be cleaned up on next put
+                Some((cached.records.clone(), cached.response_code))
             }
-        } else {
-            None
+            _ => None, // Missing, or expired (cleaned up on next put)
         }
     }
 
     /// Store a response in the cache
     pub fn put(&self, key: CacheKey, records: Vec<DnsRecord>, ttl: Option<Duration>) {
+        self.put_with_rcode(key, records, ResponseCode::NoError, ttl)
+    }
+
+    /// Store a response and its response code in the cache
+    pub fn put_with_rcode(
+        &self,
+        key: CacheKey,
+        records: Vec<DnsRecord>,
+        response_code: ResponseCode,
+        ttl: Option<Duration>,
+    ) {
         let ttl = ttl.unwrap_or(self.default_ttl);
-        let cached_response = CachedResponse::new(records, ttl);
+        let mut cached_response = CachedResponse::new(records, ttl);
+        cached_response.response_code = response_code;
 
         let mut cache = self.cache.write();
 
@@ -170,10 +187,8 @@ impl DnsCache {
     /// Evict oldest entries based on cached_at timestamp
     fn evict_oldest(&self, cache: &mut HashMap<CacheKey, CachedResponse>) {
         let to_remove = (cache.len() / 10).max(1);
-        let mut entries: Vec<(&CacheKey, Instant)> = cache
-            .iter()
-            .map(|(k, v)| (k, v.cached_at))
-            .collect();
+        let mut entries: Vec<(&CacheKey, Instant)> =
+            cache.iter().map(|(k, v)| (k, v.cached_at)).collect();
         entries.sort_by_key(|&(_, cached_at)| cached_at);
 
         let keys_to_remove: Vec<CacheKey> = entries
@@ -227,26 +242,50 @@ where
 
     /// Query with caching
     pub async fn query(&self, domain: &str, record_type: RecordType) -> Result<Vec<DnsRecord>> {
+        Ok(self.query_response(domain, record_type).await?.records)
+    }
+
+    /// Query with caching, keeping the response code
+    pub async fn query_response(
+        &self,
+        domain: &str,
+        record_type: RecordType,
+    ) -> Result<QueryResponse> {
         let key = CacheKey::new(domain, record_type);
 
-        // Check cache first
-        if let Some(cached_records) = self.cache.get(&key) {
-            return Ok(cached_records);
+        if let Some((records, response_code)) = self.cache.get_with_rcode(&key) {
+            return Ok(QueryResponse {
+                domain: domain.to_string(),
+                record_type,
+                response_code,
+                resolver: records
+                    .first()
+                    .map(|r| r.resolver.clone())
+                    .unwrap_or_else(|| "cache".to_string()),
+                query_time_ms: 0.0,
+                records,
+            });
         }
 
-        // Query upstream
-        let records = self.client.query(domain, record_type).await?;
+        let response = self.client.query_response(domain, record_type).await?;
 
-        // Cache the result (use minimum TTL from records, or a short negative-cache
-        // TTL for empty results so transient NXDOMAIN/NODATA answers don't stick around)
-        let min_ttl = records.iter()
+        // Use the minimum TTL from the records, or a short negative-cache TTL for
+        // empty results so transient NXDOMAIN/NODATA answers don't stick around
+        let min_ttl = response
+            .records
+            .iter()
             .map(|r| Duration::from_secs(r.ttl as u64))
             .min()
             .unwrap_or(Duration::from_secs(30));
 
-        self.cache.put(key, records.clone(), Some(min_ttl));
+        self.cache.put_with_rcode(
+            key,
+            response.records.clone(),
+            response.response_code,
+            Some(min_ttl),
+        );
 
-        Ok(records)
+        Ok(response)
     }
 
     /// Get cache statistics
@@ -263,13 +302,19 @@ where
 /// Trait for DNS query operations
 #[async_trait::async_trait]
 pub trait DnsQuery {
-    async fn query(&self, domain: &str, record_type: RecordType) -> Result<Vec<DnsRecord>>;
+    /// Query and return the full response, including the response code
+    async fn query_response(&self, domain: &str, record_type: RecordType) -> Result<QueryResponse>;
+
+    /// Query and return only the answer records
+    async fn query(&self, domain: &str, record_type: RecordType) -> Result<Vec<DnsRecord>> {
+        Ok(self.query_response(domain, record_type).await?.records)
+    }
 }
 
 #[async_trait::async_trait]
 impl DnsQuery for crate::client::DnsxClient {
-    async fn query(&self, domain: &str, record_type: RecordType) -> Result<Vec<DnsRecord>> {
-        self.query(domain, record_type).await
+    async fn query_response(&self, domain: &str, record_type: RecordType) -> Result<QueryResponse> {
+        crate::client::DnsxClient::query_response(self, domain, record_type).await
     }
 }
 
@@ -278,15 +323,14 @@ impl<C> DnsQuery for CachedDnsClient<C>
 where
     C: DnsQuery + Send + Sync,
 {
-    async fn query(&self, domain: &str, record_type: RecordType) -> Result<Vec<DnsRecord>> {
-        self.query(domain, record_type).await
+    async fn query_response(&self, domain: &str, record_type: RecordType) -> Result<QueryResponse> {
+        CachedDnsClient::query_response(self, domain, record_type).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ResponseCode;
 
     fn create_test_record(domain: &str, record_type: RecordType) -> DnsRecord {
         DnsRecord {

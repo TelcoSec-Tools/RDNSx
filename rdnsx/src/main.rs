@@ -1,5 +1,7 @@
 //! RDNSx CLI - Fast and multi-purpose DNS toolkit
 
+#![forbid(unsafe_code)]
+
 use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;

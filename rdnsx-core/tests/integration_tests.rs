@@ -7,11 +7,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_google_dns_resolution() {
         let client = DnsxClient::with_options(DnsxOptions {
             resolvers: vec!["8.8.8.8:53".to_string()],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let records = client.query("google.com", RecordType::A).await.unwrap();
         assert!(!records.is_empty());
@@ -20,17 +22,20 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_cloudflare_dns_resolution() {
         let client = DnsxClient::with_options(DnsxOptions {
             resolvers: vec!["1.1.1.1:53".to_string()],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let records = client.query("cloudflare.com", RecordType::A).await.unwrap();
         assert!(!records.is_empty());
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_ipv4_lookup() {
         let client = DnsxClient::new().unwrap();
         let ips = client.lookup_ipv4("github.com").await.unwrap();
@@ -42,6 +47,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_multiple_record_types() {
         let client = DnsxClient::new().unwrap();
 
@@ -56,6 +62,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_txt_record_parsing() {
         let client = DnsxClient::new().unwrap();
         let records = client.query("google.com", RecordType::Txt).await.unwrap();
@@ -69,6 +76,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_mx_record_parsing() {
         let client = DnsxClient::new().unwrap();
         let records = client.query("google.com", RecordType::Mx).await.unwrap();
@@ -83,11 +91,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_custom_timeout() {
         let client = DnsxClient::with_options(DnsxOptions {
             timeout: std::time::Duration::from_secs(1),
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         // This should work within the timeout
         let records = client.query("google.com", RecordType::A).await.unwrap();
@@ -95,18 +105,22 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_nonexistent_domain() {
         let client = DnsxClient::new().unwrap();
 
         // Query for a domain that definitely doesn't exist
-        let result = client.query("definitely-not-a-real-domain-12345.com", RecordType::A).await;
+        let response = client
+            .query_response("definitely-not-a-real-domain-12345.com", RecordType::A)
+            .await
+            .unwrap();
 
-        // Should either return empty results or an error, but not panic
-        // The exact behavior depends on the DNS server response
-        assert!(result.is_ok() || matches!(result, Err(_)));
+        assert_eq!(response.response_code, rdnsx_core::ResponseCode::NxDomain);
+        assert!(response.records.is_empty());
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_concurrent_queries() {
         let client = std::sync::Arc::new(DnsxClient::new().unwrap());
 
@@ -116,9 +130,7 @@ mod tests {
         for domain in domains {
             let client = std::sync::Arc::clone(&client);
             let domain = domain.to_string();
-            let handle = tokio::spawn(async move {
-                client.query(&domain, RecordType::A).await
-            });
+            let handle = tokio::spawn(async move { client.query(&domain, RecordType::A).await });
             handles.push(handle);
         }
 
@@ -130,6 +142,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "needs public DNS; CI runs it with --include-ignored"]
     async fn test_resolver_fallback() {
         // Test with multiple resolvers to ensure fallback works
         let client = DnsxClient::with_options(DnsxOptions {
@@ -139,7 +152,8 @@ mod tests {
                 "9.9.9.9:53".to_string(),
             ],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let records = client.query("google.com", RecordType::A).await.unwrap();
         assert!(!records.is_empty());

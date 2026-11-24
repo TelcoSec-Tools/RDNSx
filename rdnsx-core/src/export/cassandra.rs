@@ -8,9 +8,9 @@ use async_trait::async_trait;
 use scylla::client::session::Session;
 use scylla::client::session_builder::SessionBuilder;
 use scylla::frame::Compression;
-use scylla::statement::prepared::PreparedStatement;
 use scylla::statement::batch::Batch;
-use tokio::sync::{Mutex, mpsc};
+use scylla::statement::prepared::PreparedStatement;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -19,7 +19,7 @@ use crate::export::Exporter;
 use crate::types::DnsRecord;
 
 /// Performance metrics for Cassandra operations
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CassandraMetrics {
     pub total_records: usize,
     pub batches_processed: usize,
@@ -101,12 +101,16 @@ impl CassandraExporter {
             table: table.to_string(),
             batch_size,
             ..Default::default()
-        }).await
+        })
+        .await
     }
 
     /// Create a new exporter with full configuration
     pub async fn with_config(config: CassandraConfig) -> Result<Self> {
-        info!("Connecting to Cassandra cluster: {:?}", config.contact_points);
+        info!(
+            "Connecting to Cassandra cluster: {:?}",
+            config.contact_points
+        );
 
         let mut session_builder = SessionBuilder::new()
             .known_nodes(&config.contact_points)
@@ -132,7 +136,10 @@ impl CassandraExporter {
         Self::create_keyspace(&session, &config.keyspace).await?;
         Self::create_optimized_table(&session, &config.keyspace, &config.table).await?;
 
-        info!("Connected to Cassandra, using keyspace: {}, table: {}", config.keyspace, config.table);
+        info!(
+            "Connected to Cassandra, using keyspace: {}, table: {}",
+            config.keyspace, config.table
+        );
 
         // Start worker threads
         let mut workers = Vec::new();
@@ -182,14 +189,30 @@ impl CassandraExporter {
                 batch.push(record);
 
                 if batch.len() >= config.batch_size {
-                    Self::process_batch(&session, &prepared_statements, &metrics, &config, batch, worker_id).await?;
+                    Self::process_batch(
+                        &session,
+                        &prepared_statements,
+                        &metrics,
+                        &config,
+                        batch,
+                        worker_id,
+                    )
+                    .await?;
                     batch = Vec::with_capacity(config.batch_size);
                 }
             }
 
             // Process remaining records
             if !batch.is_empty() {
-                Self::process_batch(&session, &prepared_statements, &metrics, &config, batch, worker_id).await?;
+                Self::process_batch(
+                    &session,
+                    &prepared_statements,
+                    &metrics,
+                    &config,
+                    batch,
+                    worker_id,
+                )
+                .await?;
             }
 
             debug!("Worker {} finished", worker_id);
@@ -222,8 +245,12 @@ impl CassandraExporter {
                     metrics_lock.batches_processed += 1;
                     metrics_lock.total_insert_time += elapsed;
 
-                    debug!("Worker {}: Successfully inserted {} records in {:.2}ms",
-                          worker_id, batch_size, elapsed.as_millis());
+                    debug!(
+                        "Worker {}: Successfully inserted {} records in {:.2}ms",
+                        worker_id,
+                        batch_size,
+                        elapsed.as_millis()
+                    );
                     return Ok(());
                 }
                 Err(e) => {
@@ -231,8 +258,10 @@ impl CassandraExporter {
                     last_error = Some(e);
 
                     if attempts < config.retry_attempts {
-                        warn!("Worker {}: Batch insert failed (attempt {}/{}), retrying in {:?}",
-                              worker_id, attempts, config.retry_attempts, config.retry_delay);
+                        warn!(
+                            "Worker {}: Batch insert failed (attempt {}/{}), retrying in {:?}",
+                            worker_id, attempts, config.retry_attempts, config.retry_delay
+                        );
 
                         let mut metrics_lock = metrics.lock().await;
                         metrics_lock.retries += 1;
@@ -246,7 +275,9 @@ impl CassandraExporter {
         let mut metrics_lock = metrics.lock().await;
         metrics_lock.errors += 1;
 
-        Err(last_error.unwrap_or_else(|| DnsxError::Other("Batch insert failed after all retries".to_string())))
+        Err(last_error.unwrap_or_else(|| {
+            DnsxError::Other("Batch insert failed after all retries".to_string())
+        }))
     }
 
     /// Execute a batch insert operation
@@ -290,7 +321,8 @@ impl CassandraExporter {
             let record_type = record.record_type.to_string();
             let response_code = record.response_code.to_string();
             let value_str = record.value.to_string();
-            let timestamp = record.timestamp
+            let timestamp = record
+                .timestamp
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| DnsxError::Other(format!("Invalid timestamp: {}", e)))?
                 .as_millis() as i64;
@@ -375,14 +407,32 @@ impl CassandraExporter {
             .await
             .map_err(|e| DnsxError::Other(format!("Failed to create optimized table: {}", e)))?;
 
-        debug!("Optimized table '{}.{}' created or already exists", keyspace, table);
+        debug!(
+            "Optimized table '{}.{}' created or already exists",
+            keyspace, table
+        );
         Ok(())
     }
 
     /// Get performance metrics
+    ///
+    /// Returns a snapshot; if a worker holds the lock at this instant, the
+    /// default (empty) metrics are returned rather than blocking the runtime.
     pub fn metrics(&self) -> CassandraMetrics {
-        // self.metrics.blocking_lock().clone() // Temporarily disabled
-        CassandraMetrics::default()
+        let mut metrics = self
+            .metrics
+            .try_lock()
+            .map(|m| m.clone())
+            .unwrap_or_default();
+        let secs = metrics.total_insert_time.as_secs_f64();
+        if secs > 0.0 {
+            metrics.records_per_second = metrics.total_records as f64 / secs;
+        }
+        if metrics.batches_processed > 0 {
+            metrics.average_batch_time =
+                metrics.total_insert_time / metrics.batches_processed as u32;
+        }
+        metrics
     }
 
     /// Get configuration
@@ -393,13 +443,31 @@ impl CassandraExporter {
 
 #[async_trait]
 impl Exporter for CassandraExporter {
+    fn metrics_summary(&self) -> Option<String> {
+        let m = self.metrics();
+        if m.total_records == 0 {
+            return None;
+        }
+        Some(format!(
+            "{} records inserted in {:.2}s ({:.1} rps), {} batches, {} errors, {} retries",
+            m.total_records,
+            m.total_insert_time.as_secs_f64(),
+            m.records_per_second,
+            m.batches_processed,
+            m.errors,
+            m.retries
+        ))
+    }
+
     async fn export(&self, record: DnsRecord) -> Result<()> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_WORKER: AtomicUsize = AtomicUsize::new(0);
 
         let senders = self.record_senders.lock().await;
         if senders.is_empty() {
-            return Err(DnsxError::Other("Cassandra exporter has already been flushed".to_string()));
+            return Err(DnsxError::Other(
+                "Cassandra exporter has already been flushed".to_string(),
+            ));
         }
 
         let worker_index = NEXT_WORKER.fetch_add(1, Ordering::Relaxed) % senders.len();

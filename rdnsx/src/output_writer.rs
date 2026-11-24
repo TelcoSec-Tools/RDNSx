@@ -35,12 +35,14 @@ impl OutputWriter {
     }
 
     pub fn write_record(&mut self, record: &DnsRecord, resp_only: bool) -> Result<()> {
-        if self.silent {
-            return Ok(());
-        }
-
+        // Results are always written; --silent only hides the banner and
+        // progress messages on stderr, so `rdnsx --silent ... | grep` works.
         if resp_only {
-            writeln!(self.writer, "{}", record.value)?;
+            if record.is_negative() {
+                writeln!(self.writer, "{}", record.response_code)?;
+            } else {
+                writeln!(self.writer, "{}", record.value)?;
+            }
         } else if self.json_output {
             let json = serde_json::to_string(record)?;
             writeln!(self.writer, "{}", json)?;
@@ -52,18 +54,12 @@ impl OutputWriter {
     }
 
     pub fn write_json<T: serde::Serialize>(&mut self, value: &T) -> Result<()> {
-        if self.silent {
-            return Ok(());
-        }
         let json = serde_json::to_string_pretty(value)?;
         writeln!(self.writer, "{}", json)?;
         Ok(())
     }
 
     pub fn write_line(&mut self, line: &str) -> Result<()> {
-        if self.silent {
-            return Ok(());
-        }
         writeln!(self.writer, "{}", line)?;
         Ok(())
     }

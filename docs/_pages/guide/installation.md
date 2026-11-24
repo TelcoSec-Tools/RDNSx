@@ -16,7 +16,7 @@ changefreq: monthly
 
 ## Prerequisites
 
-- Rust 1.70.0 or later
+- Rust 1.94 or later
 - Cargo package manager
 
 ## From Source (Recommended)
@@ -103,7 +103,7 @@ You should see the RDNSx banner and available commands.
 ## Troubleshooting
 
 ### Build fails
-Ensure you have Rust 1.70.0+ installed:
+Ensure you have Rust 1.94+ installed:
 ```bash
 rustc --version
 cargo --version

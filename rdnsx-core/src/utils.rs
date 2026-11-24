@@ -6,16 +6,19 @@ use crate::error::{DnsxError, Result};
 
 /// Parse a resolver string into a SocketAddr
 pub fn parse_resolver(resolver: &str) -> Result<SocketAddr> {
-    // If no port is specified, default to 53
-    let resolver_with_port = if resolver.contains(':') {
-        resolver.to_string()
-    } else {
-        format!("{}:53", resolver)
-    };
-
-    resolver_with_port
-        .parse()
-        .map_err(|e| DnsxError::ResolverConfig(format!("Invalid resolver address: {}", e)))
+    let resolver = resolver.trim();
+    // "1.2.3.4:53" or "[2001:db8::1]:53"
+    if let Ok(addr) = resolver.parse::<SocketAddr>() {
+        return Ok(addr);
+    }
+    // Bare address (IPv4, IPv6, or bracketed IPv6) defaults to port 53
+    resolver
+        .trim_matches(|c| c == '[' || c == ']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| SocketAddr::new(ip, 53))
+        .map_err(|e| {
+            DnsxError::ResolverConfig(format!("Invalid resolver address {}: {}", resolver, e))
+        })
 }
 
 /// Parse a resolver string into a SocketAddr (legacy function - renamed)
@@ -47,7 +50,10 @@ pub fn reverse_ip(ip: &str) -> Result<String> {
     match ip.parse::<IpAddr>()? {
         IpAddr::V4(ipv4) => {
             let octets = ipv4.octets();
-            Ok(format!("{}.{}.{}.{}.in-addr.arpa", octets[3], octets[2], octets[1], octets[0]))
+            Ok(format!(
+                "{}.{}.{}.{}.in-addr.arpa",
+                octets[3], octets[2], octets[1], octets[0]
+            ))
         }
         IpAddr::V6(ipv6) => {
             let segments = ipv6.segments();
@@ -141,12 +147,31 @@ mod tests {
     fn test_reverse_ip_ipv6() {
         let result = reverse_ip("2001:db8::1");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa");
+        assert_eq!(
+            result.unwrap(),
+            "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"
+        );
     }
 
     #[test]
     fn test_reverse_ip_invalid() {
         let result = reverse_ip("invalid");
         assert!(result.is_err());
+    }
+}
+#[cfg(test)]
+mod resolver_parse_tests {
+    use super::parse_resolver;
+
+    #[test]
+    fn parses_resolver_forms() {
+        assert_eq!(parse_resolver("8.8.8.8").unwrap().to_string(), "8.8.8.8:53");
+        assert_eq!(parse_resolver("8.8.8.8:5353").unwrap().port(), 5353);
+        assert_eq!(parse_resolver("2001:4860:4860::8888").unwrap().port(), 53);
+        assert_eq!(
+            parse_resolver("[2001:4860:4860::8888]:853").unwrap().port(),
+            853
+        );
+        assert!(parse_resolver("not-an-ip").is_err());
     }
 }

@@ -32,6 +32,50 @@ pub struct DmarcRecord {
     pub resolver: String,
 }
 
+/// DKIM selectors commonly used by mail providers and platforms
+pub const COMMON_DKIM_SELECTORS: &[&str] = &[
+    "default",
+    "dkim",
+    "dkim1",
+    "dkim2",
+    "mail",
+    "smtp",
+    "email",
+    "key1",
+    "key2",
+    "google", // Google Workspace
+    "selector1",
+    "selector2", // Microsoft 365
+    "k1",
+    "k2",
+    "k3", // Mailchimp / Mandrill
+    "mandrill",
+    "s1",
+    "s2", // SendGrid and others
+    "zoho",
+    "zmail", // Zoho
+    "protonmail",
+    "protonmail2",
+    "protonmail3",
+    "sig1", // iCloud
+    "fm1",
+    "fm2",
+    "fm3", // Fastmail
+    "mxvault",
+    "everlytickey1",
+    "everlytickey2",
+    "turbo-smtp",
+    "pm",
+    "scph0219",
+];
+
+/// Whether a TXT string looks like a DKIM key record. Many records omit "v=DKIM1",
+/// so also accept records carrying a public key tag.
+fn is_dkim_record(txt: &str) -> bool {
+    let t = txt.trim_start();
+    t.starts_with("v=DKIM1") || t.split(';').any(|tag| tag.trim().starts_with("p="))
+}
+
 /// DKIM selector information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DkimSelector {
@@ -62,10 +106,15 @@ impl EmailSecurityEnumerator {
         };
 
         // Get SPF record
-        if let Ok((lookup, resolver_addr)) = self.resolver_pool.query(domain, crate::RecordType::Txt).await {
+        if let Ok((lookup, resolver_addr)) = self
+            .resolver_pool
+            .query(domain, crate::RecordType::Txt)
+            .await
+        {
             for rdata in lookup.iter() {
                 if let hickory_resolver::proto::rr::RData::TXT(txt) = rdata {
-                    let txt_content = txt.iter()
+                    let txt_content = txt
+                        .iter()
                         .map(|bytes| String::from_utf8_lossy(bytes))
                         .collect::<Vec<_>>()
                         .join("");
@@ -82,10 +131,15 @@ impl EmailSecurityEnumerator {
 
         // Get DMARC record
         let dmarc_domain = format!("_dmarc.{}", domain);
-        if let Ok((lookup, resolver_addr)) = self.resolver_pool.query(&dmarc_domain, RecordType::Txt).await {
+        if let Ok((lookup, resolver_addr)) = self
+            .resolver_pool
+            .query(&dmarc_domain, RecordType::Txt)
+            .await
+        {
             for rdata in lookup.iter() {
                 if let hickory_resolver::proto::rr::RData::TXT(txt) = rdata {
-                    let txt_content = txt.iter()
+                    let txt_content = txt
+                        .iter()
                         .map(|bytes| String::from_utf8_lossy(bytes))
                         .collect::<Vec<_>>()
                         .join("");
@@ -101,27 +155,39 @@ impl EmailSecurityEnumerator {
             }
         }
 
-        // Try common DKIM selectors
-        let common_selectors = vec!["default", "google", "mail", "smtp", "dkim"];
-        for selector in common_selectors {
-            let dkim_domain = format!("{}.domainkey.{}", selector, domain);
-            if let Ok((lookup, _)) = self.resolver_pool.query(&dkim_domain, RecordType::Txt).await {
-                for rdata in lookup.iter() {
-                    if let hickory_resolver::proto::rr::RData::TXT(txt) = rdata {
-                        let txt_content = txt.iter()
-                            .map(|bytes| String::from_utf8_lossy(bytes))
-                            .collect::<Vec<_>>()
-                            .join("");
+        // Probe common DKIM selectors (records live at <selector>._domainkey.<domain>)
+        let lookups = COMMON_DKIM_SELECTORS.iter().map(|selector| {
+            let dkim_domain = format!("{}._domainkey.{}", selector, domain);
+            async move {
+                let records = match self
+                    .resolver_pool
+                    .query(&dkim_domain, RecordType::Txt)
+                    .await
+                {
+                    Ok((lookup, _)) => lookup
+                        .iter()
+                        .filter_map(|rdata| match rdata {
+                            hickory_resolver::proto::rr::RData::TXT(txt) => Some(
+                                txt.iter()
+                                    .map(|bytes| String::from_utf8_lossy(bytes))
+                                    .collect::<Vec<_>>()
+                                    .join(""),
+                            ),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                    Err(_) => Vec::new(),
+                };
+                (*selector, records)
+            }
+        });
 
-                        if txt_content.starts_with("v=DKIM1") {
-                            result.dkim_selectors.push(DkimSelector {
-                                selector: selector.to_string(),
-                                record: txt_content,
-                            });
-                            break;
-                        }
-                    }
-                }
+        for (selector, records) in futures::future::join_all(lookups).await {
+            if let Some(record) = records.into_iter().find(|r| is_dkim_record(r)) {
+                result.dkim_selectors.push(DkimSelector {
+                    selector: selector.to_string(),
+                    record,
+                });
             }
         }
 
@@ -141,7 +207,9 @@ impl EmailSecurityEnumerator {
 
         // Basic SPF validation
         if !spf_record.starts_with("v=spf1") {
-            analysis.warnings.push("SPF record does not start with 'v=spf1'".to_string());
+            analysis
+                .warnings
+                .push("SPF record does not start with 'v=spf1'".to_string());
             return analysis;
         }
 
@@ -150,11 +218,15 @@ impl EmailSecurityEnumerator {
         // Parse mechanisms
         let mechanisms: Vec<&str> = spf_record.split_whitespace().collect();
 
-        for mechanism in mechanisms.iter().skip(1) { // Skip "v=spf1"
+        for mechanism in mechanisms.iter().skip(1) {
+            // Skip "v=spf1"
             if let Some(inc) = mechanism.strip_prefix("include:") {
                 analysis.includes.push(inc.to_string());
-            } else if mechanism.starts_with("+all") || mechanism.starts_with("-all") ||
-                      mechanism.starts_with("~all") || mechanism.starts_with("?all") {
+            } else if mechanism.starts_with("+all")
+                || mechanism.starts_with("-all")
+                || mechanism.starts_with("~all")
+                || mechanism.starts_with("?all")
+            {
                 analysis.has_all = true;
                 analysis.all_mechanism = Some(mechanism.to_string());
             }
@@ -162,11 +234,16 @@ impl EmailSecurityEnumerator {
 
         // Generate recommendations
         if !analysis.has_all {
-            analysis.recommendations.push("Add an 'all' mechanism to specify what to do with non-matching sources".to_string());
+            analysis.recommendations.push(
+                "Add an 'all' mechanism to specify what to do with non-matching sources"
+                    .to_string(),
+            );
         }
 
         if analysis.includes.len() > 10 {
-            analysis.warnings.push("Too many include mechanisms may cause DNS lookup limits".to_string());
+            analysis
+                .warnings
+                .push("Too many include mechanisms may cause DNS lookup limits".to_string());
         }
 
         analysis
@@ -186,7 +263,9 @@ impl EmailSecurityEnumerator {
         };
 
         if !dmarc_record.starts_with("v=DMARC1") {
-            analysis.warnings.push("DMARC record does not start with 'v=DMARC1'".to_string());
+            analysis
+                .warnings
+                .push("DMARC record does not start with 'v=DMARC1'".to_string());
             return analysis;
         }
 
@@ -195,7 +274,8 @@ impl EmailSecurityEnumerator {
         // Parse tags
         let tags: Vec<&str> = dmarc_record.split(';').collect();
 
-        for tag in tags.iter().skip(1) { // Skip "v=DMARC1"
+        for tag in tags.iter().skip(1) {
+            // Skip "v=DMARC1"
             let tag = tag.trim();
             if let Some((key, value)) = tag.split_once('=') {
                 match key {
@@ -215,15 +295,21 @@ impl EmailSecurityEnumerator {
 
         // Generate recommendations
         if analysis.policy.as_deref() != Some("reject") {
-            analysis.recommendations.push("Consider using 'p=reject' for maximum protection".to_string());
+            analysis
+                .recommendations
+                .push("Consider using 'p=reject' for maximum protection".to_string());
         }
 
         if analysis.percentage < 100 {
-            analysis.warnings.push("DMARC is not applied to all emails".to_string());
+            analysis
+                .warnings
+                .push("DMARC is not applied to all emails".to_string());
         }
 
         if analysis.rua.is_none() {
-            analysis.recommendations.push("Add 'rua' tag to receive aggregate reports".to_string());
+            analysis
+                .recommendations
+                .push("Add 'rua' tag to receive aggregate reports".to_string());
         }
 
         analysis
@@ -252,4 +338,15 @@ pub struct DmarcAnalysis {
     pub ruf: Option<String>,
     pub warnings: Vec<String>,
     pub recommendations: Vec<String>,
+}
+#[cfg(test)]
+mod dkim_tests {
+    use super::is_dkim_record;
+
+    #[test]
+    fn recognises_dkim_records() {
+        assert!(is_dkim_record("v=DKIM1; k=rsa; p=MIGf"));
+        assert!(is_dkim_record("k=rsa; p=MIGf"));
+        assert!(!is_dkim_record("v=spf1 -all"));
+    }
 }

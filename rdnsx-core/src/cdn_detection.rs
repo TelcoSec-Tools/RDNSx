@@ -54,6 +54,7 @@ pub struct TtlAnalysis {
 /// Geographic distribution analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeographicDistribution {
+    /// Distinct registry countries of the announcing prefixes (0 when unknown)
     pub unique_countries: usize,
     pub unique_asns: usize,
     pub is_geographically_distributed: bool,
@@ -85,6 +86,13 @@ pub struct AsnInfo {
     pub asn: u32,
     pub organization: String,
     pub is_cdn_asn: bool,
+    /// Announced prefix covering the IP
+    pub prefix: Option<String>,
+    /// Registry country of the prefix (not the physical location of the server)
+    pub country: Option<String>,
+    /// Where the data came from: "team-cymru" (live DNS lookup) or
+    /// "heuristic" (built-in, incomplete IP range table)
+    pub source: String,
 }
 
 /// CDN detection functionality
@@ -129,9 +137,15 @@ impl CdnDetector {
         let mut all_ips = Vec::new();
         let mut all_ttls = Vec::new();
 
-        if let Ok((lookup, _)) = self.resolver_pool.query(&cname_result.final_domain, crate::RecordType::A).await {
+        if let Ok((lookup, _)) = self
+            .resolver_pool
+            .query(&cname_result.final_domain, crate::RecordType::A)
+            .await
+        {
             for record in lookup.records() {
-                if let hickory_resolver::proto::rr::RData::A(ip) = record.data().expect("Record data missing") {
+                if let hickory_resolver::proto::rr::RData::A(ip) =
+                    record.data().expect("Record data missing")
+                {
                     let ip_addr = IpAddr::V4(**ip);
                     all_ips.push(ip_addr);
                     all_ttls.push(record.ttl());
@@ -154,11 +168,15 @@ impl CdnDetector {
 
         // Perform geographic distribution analysis
         if !all_ips.is_empty() {
-            result.geographic_distribution = Some(self.analyze_geographic_distribution(&all_ips).await?);
+            result.geographic_distribution =
+                Some(self.analyze_geographic_distribution(&all_ips).await?);
         }
 
         // Perform response time analysis
-        result.response_time_analysis = Some(self.analyze_response_time(&cname_result.final_domain).await?);
+        result.response_time_analysis = Some(
+            self.analyze_response_time(&cname_result.final_domain)
+                .await?,
+        );
 
         // Perform comprehensive analysis
         result.analysis = self.analyze_cdn_usage(&result).await?;
@@ -173,14 +191,20 @@ impl CdnDetector {
         let mut chain = Vec::new();
         let mut provider = None;
 
-        for _ in 0..10 { // Prevent infinite loops
+        for _ in 0..10 {
+            // Prevent infinite loops
             if visited.contains(&current_domain) {
                 break;
             }
             visited.insert(current_domain.clone());
 
-            if let Ok((lookup, _)) = self.resolver_pool.query(&current_domain, RecordType::Cname).await {
-                if let Some(hickory_resolver::proto::rr::RData::CNAME(cname)) = lookup.iter().next() {
+            if let Ok((lookup, _)) = self
+                .resolver_pool
+                .query(&current_domain, RecordType::Cname)
+                .await
+            {
+                if let Some(hickory_resolver::proto::rr::RData::CNAME(cname)) = lookup.iter().next()
+                {
                     let cname_target = cname.to_string();
                     chain.push(CnameHop {
                         from: current_domain.clone(),
@@ -213,93 +237,98 @@ impl CdnDetector {
         let domain_lower = domain.to_lowercase();
 
         // Major CDN providers with comprehensive pattern matching
-        if domain_lower.contains("cloudflare") ||
-           domain_lower.contains("cdn.cloudflare") ||
-           domain_lower.ends_with(".cloudflare.net") ||
-           domain_lower.ends_with(".cloudflarestream.com") {
+        if domain_lower.contains("cloudflare")
+            || domain_lower.contains("cdn.cloudflare")
+            || domain_lower.ends_with(".cloudflare.net")
+            || domain_lower.ends_with(".cloudflarestream.com")
+        {
             Some("Cloudflare".to_string())
-        } else if domain_lower.contains("cloudfront") ||
-                  domain_lower.contains("amazonaws") ||
-                  domain_lower.ends_with(".cloudfront.net") ||
-                  domain_lower.contains("awsglobalaccelerator") {
+        } else if domain_lower.contains("cloudfront")
+            || domain_lower.contains("amazonaws")
+            || domain_lower.ends_with(".cloudfront.net")
+            || domain_lower.contains("awsglobalaccelerator")
+        {
             Some("Amazon CloudFront".to_string())
-        } else if domain_lower.contains("akamai") ||
-                  domain_lower.contains("edgesuite") ||
-                  domain_lower.contains("edgekey") ||
-                  domain_lower.contains("akamaiedge") ||
-                  domain_lower.ends_with(".akamai.net") ||
-                  domain_lower.ends_with(".akamaized.net") {
+        } else if domain_lower.contains("akamai")
+            || domain_lower.contains("edgesuite")
+            || domain_lower.contains("edgekey")
+            || domain_lower.contains("akamaiedge")
+            || domain_lower.ends_with(".akamai.net")
+            || domain_lower.ends_with(".akamaized.net")
+        {
             Some("Akamai".to_string())
-        } else if domain_lower.contains("fastly") ||
-                  domain_lower.ends_with(".fastly.net") ||
-                  domain_lower.contains("fastlylb") {
+        } else if domain_lower.contains("fastly")
+            || domain_lower.ends_with(".fastly.net")
+            || domain_lower.contains("fastlylb")
+        {
             Some("Fastly".to_string())
-        } else if domain_lower.contains("keycdn") ||
-                  domain_lower.ends_with(".kxcdn.com") {
+        } else if domain_lower.contains("keycdn") || domain_lower.ends_with(".kxcdn.com") {
             Some("KeyCDN".to_string())
-        } else if domain_lower.contains("stackpath") ||
-                  domain_lower.contains("stackpathcdn") ||
-                  domain_lower.ends_with(".stackpathcdn.com") {
+        } else if domain_lower.contains("stackpath")
+            || domain_lower.contains("stackpathcdn")
+            || domain_lower.ends_with(".stackpathcdn.com")
+        {
             Some("StackPath".to_string())
-        } else if domain_lower.contains("bunnycdn") ||
-                  domain_lower.contains("bunny.net") ||
-                  domain_lower.ends_with(".b-cdn.net") {
+        } else if domain_lower.contains("bunnycdn")
+            || domain_lower.contains("bunny.net")
+            || domain_lower.ends_with(".b-cdn.net")
+        {
             Some("Bunny CDN".to_string())
-        } else if domain_lower.contains("cdn77") ||
-                  domain_lower.contains("cdn77.net") {
+        } else if domain_lower.contains("cdn77") || domain_lower.contains("cdn77.net") {
             Some("CDN77".to_string())
-        } else if domain_lower.contains("incapsula") ||
-                  domain_lower.contains("imperva") ||
-                  domain_lower.contains("iphlp") ||
-                  domain_lower.ends_with(".incapdns.net") {
+        } else if domain_lower.contains("incapsula")
+            || domain_lower.contains("imperva")
+            || domain_lower.contains("iphlp")
+            || domain_lower.ends_with(".incapdns.net")
+        {
             Some("Imperva Incapsula".to_string())
-        } else if domain_lower.contains("sucuri") ||
-                  domain_lower.ends_with(".sucuri.net") {
+        } else if domain_lower.contains("sucuri") || domain_lower.ends_with(".sucuri.net") {
             Some("Sucuri".to_string())
-        } else if domain_lower.contains("stackpath") ||
-                  domain_lower.ends_with(".stackpathdns.com") {
+        } else if domain_lower.contains("stackpath") || domain_lower.ends_with(".stackpathdns.com")
+        {
             Some("StackPath".to_string())
-        } else if domain_lower.contains("cdnify") ||
-                  domain_lower.contains("limelight") ||
-                  domain_lower.ends_with(".llnwd.net") {
+        } else if domain_lower.contains("cdnify")
+            || domain_lower.contains("limelight")
+            || domain_lower.ends_with(".llnwd.net")
+        {
             Some("Limelight Networks".to_string())
-        } else if domain_lower.contains("level3") ||
-                  domain_lower.contains("centurylink") ||
-                  domain_lower.ends_with(".level3.net") {
+        } else if domain_lower.contains("level3")
+            || domain_lower.contains("centurylink")
+            || domain_lower.ends_with(".level3.net")
+        {
             Some("CenturyLink/Level3".to_string())
-        } else if domain_lower.contains("cdn.video") ||
-                  domain_lower.contains("cdnsun") ||
-                  domain_lower.ends_with(".cdnsun.net") {
+        } else if domain_lower.contains("cdn.video")
+            || domain_lower.contains("cdnsun")
+            || domain_lower.ends_with(".cdnsun.net")
+        {
             Some("CDN Sun".to_string())
-        } else if domain_lower.contains("chinacache") ||
-                  domain_lower.contains("c3cache") {
+        } else if domain_lower.contains("chinacache") || domain_lower.contains("c3cache") {
             Some("ChinaCache".to_string())
-        } else if domain_lower.contains("azure") ||
-                  domain_lower.contains("azureedge") ||
-                  domain_lower.ends_with(".azureedge.net") {
+        } else if domain_lower.contains("azure")
+            || domain_lower.contains("azureedge")
+            || domain_lower.ends_with(".azureedge.net")
+        {
             Some("Microsoft Azure CDN".to_string())
-        } else if domain_lower.contains("google") ||
-                  domain_lower.contains("googlevideo") ||
-                  domain_lower.ends_with(".googleusercontent.com") ||
-                  domain_lower.ends_with(".appspot.com") {
+        } else if domain_lower.contains("google")
+            || domain_lower.contains("googlevideo")
+            || domain_lower.ends_with(".googleusercontent.com")
+            || domain_lower.ends_with(".appspot.com")
+        {
             Some("Google Cloud CDN".to_string())
-        } else if domain_lower.contains("verizon") ||
-                  domain_lower.contains("edgecast") ||
-                  domain_lower.ends_with(".edgecastcdn.net") {
+        } else if domain_lower.contains("verizon")
+            || domain_lower.contains("edgecast")
+            || domain_lower.ends_with(".edgecastcdn.net")
+        {
             Some("Verizon EdgeCast".to_string())
-        } else if domain_lower.contains("leaseweb") ||
-                  domain_lower.ends_with(".leasewebcdn.com") {
+        } else if domain_lower.contains("leaseweb") || domain_lower.ends_with(".leasewebcdn.com") {
             Some("Leaseweb CDN".to_string())
-        } else if domain_lower.contains("highwinds") ||
-                  domain_lower.contains("cdn.highwinds") {
+        } else if domain_lower.contains("highwinds") || domain_lower.contains("cdn.highwinds") {
             Some("Highwinds".to_string())
         } else if domain_lower.contains("cachefly") {
             Some("CacheFly".to_string())
-        } else if domain_lower.contains("mirror-image") ||
-                  domain_lower.contains("mirrorimage") {
+        } else if domain_lower.contains("mirror-image") || domain_lower.contains("mirrorimage") {
             Some("Mirror Image".to_string())
-        } else if domain_lower.contains("cdn.jsdelivr") ||
-                  domain_lower.contains("jsdelivr") {
+        } else if domain_lower.contains("cdn.jsdelivr") || domain_lower.contains("jsdelivr") {
             Some("jsDelivr".to_string())
         } else if domain_lower.contains("unpkg") {
             Some("UNPKG".to_string())
@@ -373,53 +402,79 @@ impl CdnDetector {
             }
         }
 
+        // Prefer live ASN data over the built-in range table
+        if info.provider.is_none() {
+            if let Some(asn) = info.asn_info.as_ref().filter(|a| a.is_cdn_asn) {
+                info.is_cloud_provider = true;
+                info.provider = Some(asn.organization.clone());
+            }
+        }
+
         Ok(info)
     }
 
-    /// Get ASN information for an IP address
+    /// Get ASN information for an IP address.
+    ///
+    /// Uses the Team Cymru IP-to-ASN DNS service; falls back to a built-in table
+    /// of well-known provider ranges (marked `source: "heuristic"`).
     async fn get_asn_info(&self, ip: IpAddr) -> Result<AsnInfo> {
-        // For now, we'll use a simplified ASN detection based on known CDN ASNs
-        // In a real implementation, you'd query an ASN database or service
+        const CDN_ASNS: &[u32] = &[
+            13335, 209242, // Cloudflare
+            20940, 16625, 12222, 21342, 21399, 32787, 35994, // Akamai
+            54113, // Fastly
+            16509, 14618, // Amazon
+            15169, 396982, 19527, // Google
+            8068, 8075, 8069, // Microsoft
+            60068, 12008,  // CDN77 / StackPath
+            22822,  // Edgio / Limelight
+            19551,  // Imperva Incapsula
+            30148,  // Sucuri
+            13414,  // Twitter
+            32934,  // Facebook
+            200325, // bunny.net
+        ];
+
+        if let Ok(record) = crate::asn::lookup_ip_asn(&self.resolver_pool, &ip).await {
+            return Ok(AsnInfo {
+                asn: record.asn,
+                organization: record
+                    .as_name
+                    .unwrap_or_else(|| format!("AS{}", record.asn)),
+                is_cdn_asn: CDN_ASNS.contains(&record.asn),
+                prefix: Some(record.prefix),
+                country: record.country,
+                source: "team-cymru".to_string(),
+            });
+        }
 
         if let IpAddr::V4(ipv4) = ip {
             let ip_u32 = u32::from_be_bytes(ipv4.octets());
-
-            // Check known CDN ASNs (simplified mapping)
-            let cdn_asns = [
+            let known = [
                 (13335, "Cloudflare"),
                 (20940, "Akamai"),
                 (54113, "Fastly"),
-                (16509, "Amazon (CloudFront)"),
-                (16625, "Akamai"),
-                (209242, "Cloudflare"),
-                (396982, "Google Cloud"),
+                (16509, "Amazon"),
                 (15169, "Google"),
-                (8068, "Microsoft"),
                 (8075, "Microsoft"),
-                (12008, "CDN77"),
-                (197902, "StackPath"),
-                (60068, "CDN77"),
-                (62240, "Clouvider"),
-                (9009, "M247"),
             ];
-
-            for (asn, org) in cdn_asns.iter() {
-                if Self::is_asn_range(ip_u32, *asn) {
+            for (asn, org) in known {
+                if Self::is_asn_range(ip_u32, asn) {
                     return Ok(AsnInfo {
-                        asn: *asn,
+                        asn,
                         organization: org.to_string(),
                         is_cdn_asn: true,
+                        prefix: None,
+                        country: None,
+                        source: "heuristic".to_string(),
                     });
                 }
             }
         }
 
-        // Default ASN info for unknown IPs
-        Ok(AsnInfo {
-            asn: 0,
-            organization: "Unknown".to_string(),
-            is_cdn_asn: false,
-        })
+        Err(crate::error::DnsxError::Other(format!(
+            "ASN unknown for {}",
+            ip
+        )))
     }
 
     /// Simple ASN range detection (simplified for demo)
@@ -427,12 +482,12 @@ impl CdnDetector {
         // This is a very simplified ASN detection
         // Real ASN detection would require a proper ASN database
         match asn {
-            13335 => Self::is_cloudflare_ip(ip), // Cloudflare
-            20940 | 16625 => Self::is_akamai_ip(ip), // Akamai
-            54113 => Self::is_fastly_ip(ip), // Fastly
-            16509 => Self::is_aws_ip(ip), // AWS
+            13335 => Self::is_cloudflare_ip(ip),            // Cloudflare
+            20940 | 16625 => Self::is_akamai_ip(ip),        // Akamai
+            54113 => Self::is_fastly_ip(ip),                // Fastly
+            16509 => Self::is_aws_ip(ip),                   // AWS
             396982 | 15169 => Self::is_google_cloud_ip(ip), // Google
-            8068 | 8075 => Self::is_azure_ip(ip), // Azure
+            8068 | 8075 => Self::is_azure_ip(ip),           // Azure
             _ => false,
         }
     }
@@ -454,7 +509,9 @@ impl CdnDetector {
             (0x34D00000, 0x34D7FFFF), // 52.208.0.0/13
         ];
 
-        aws_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        aws_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to Google Cloud ranges
@@ -468,7 +525,9 @@ impl CdnDetector {
             (0x23D00000, 0x23D3FFFF), // 35.208.0.0/12
         ];
 
-        google_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        google_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to Azure ranges
@@ -482,7 +541,9 @@ impl CdnDetector {
             (0x34C00000, 0x34FFFFFF), // 52.192.0.0/10
         ];
 
-        azure_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        azure_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to DigitalOcean ranges
@@ -495,7 +556,9 @@ impl CdnDetector {
             (0x68870000, 0x6887FFFF), // 104.135.0.0/16
         ];
 
-        do_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        do_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to Linode ranges
@@ -508,7 +571,9 @@ impl CdnDetector {
             (0x618C0000, 0x618CFFFF), // 97.107.128.0/17
         ];
 
-        linode_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        linode_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to Cloudflare ranges
@@ -520,7 +585,9 @@ impl CdnDetector {
             (0x6721F000, 0x6721F3FF), // 103.31.240.0/22
         ];
 
-        cf_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        cf_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to Akamai ranges
@@ -532,7 +599,9 @@ impl CdnDetector {
             (0x5C7A0000, 0x5C7BFFFF), // 92.122.0.0/15
         ];
 
-        akamai_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        akamai_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Check if IP belongs to Fastly ranges
@@ -544,7 +613,9 @@ impl CdnDetector {
             (0x2BF96000, 0x2BF963FF), // 43.249.96.0/22
         ];
 
-        fastly_ranges.iter().any(|&(start, end)| ip >= start && ip <= end)
+        fastly_ranges
+            .iter()
+            .any(|&(start, end)| ip >= start && ip <= end)
     }
 
     /// Perform comprehensive CDN analysis
@@ -572,7 +643,10 @@ impl CdnDetector {
         if let Some(ttl_analysis) = &result.ttl_analysis {
             if ttl_analysis.cdn_typical_ttl {
                 score += 0.5;
-                reasons.push(format!("TTL pattern typical for CDN (avg: {}s)", ttl_analysis.average_ttl));
+                reasons.push(format!(
+                    "TTL pattern typical for CDN (avg: {}s)",
+                    ttl_analysis.average_ttl
+                ));
             }
             if ttl_analysis.ttl_consistency_score > 0.7 {
                 score += 0.3;
@@ -583,30 +657,43 @@ impl CdnDetector {
         if let Some(resp_analysis) = &result.response_time_analysis {
             if resp_analysis.cdn_typical_performance {
                 score += 0.6;
-                reasons.push(format!("Fast, consistent response times (avg: {:.1}ms)", resp_analysis.average_response_time_ms));
+                reasons.push(format!(
+                    "Fast, consistent response times (avg: {:.1}ms)",
+                    resp_analysis.average_response_time_ms
+                ));
             }
         }
 
         if let Some(geo_dist) = &result.geographic_distribution {
             if geo_dist.is_geographically_distributed {
                 score += 0.7;
-                reasons.push(format!("Geographically distributed IPs ({} networks)", geo_dist.unique_countries));
+                reasons.push(format!(
+                    "Geographically distributed IPs ({} networks)",
+                    geo_dist.unique_countries
+                ));
             }
         }
 
         // Low confidence indicators (weight: 0.1-0.3)
         if result.cname_chain.len() > 2 {
             score += 0.4;
-            reasons.push(format!("Long CNAME chain ({} hops)", result.cname_chain.len()));
+            reasons.push(format!(
+                "Long CNAME chain ({} hops)",
+                result.cname_chain.len()
+            ));
         } else if result.cname_chain.len() > 1 {
             score += 0.2;
             reasons.push("Multiple CNAME redirects".to_string());
         }
 
         let domain_lower = result.domain.to_lowercase();
-        if domain_lower.contains("cdn") || domain_lower.contains("edge") ||
-           domain_lower.contains("cache") || domain_lower.contains("static") ||
-           domain_lower.contains("assets") || domain_lower.contains("media") {
+        if domain_lower.contains("cdn")
+            || domain_lower.contains("edge")
+            || domain_lower.contains("cache")
+            || domain_lower.contains("static")
+            || domain_lower.contains("assets")
+            || domain_lower.contains("media")
+        {
             score += 0.3;
             reasons.push("Domain contains CDN-related keywords".to_string());
         }
@@ -614,30 +701,48 @@ impl CdnDetector {
         if let Some(origin) = &result.analysis.origin_server_info {
             if origin.is_cloud_provider {
                 score += 0.4;
-                reasons.push(format!("Origin server hosted on cloud provider: {}", origin.provider.as_deref().unwrap_or("Unknown")));
-                analysis.detected_providers.push(format!("{} Origin", origin.provider.as_deref().unwrap_or("Cloud")));
+                reasons.push(format!(
+                    "Origin server hosted on cloud provider: {}",
+                    origin.provider.as_deref().unwrap_or("Unknown")
+                ));
+                analysis.detected_providers.push(format!(
+                    "{} Origin",
+                    origin.provider.as_deref().unwrap_or("Cloud")
+                ));
             }
 
             if let Some(asn_info) = &origin.asn_info {
                 if asn_info.is_cdn_asn {
                     score += 0.8;
-                    reasons.push(format!("IP belongs to known CDN ASN {} ({})", asn_info.asn, asn_info.organization));
-                    analysis.detected_providers.push(format!("ASN {} ({})", asn_info.asn, asn_info.organization));
+                    reasons.push(format!(
+                        "IP belongs to known CDN ASN {} ({})",
+                        asn_info.asn, asn_info.organization
+                    ));
+                    analysis
+                        .detected_providers
+                        .push(format!("ASN {} ({})", asn_info.asn, asn_info.organization));
                 }
             }
         }
 
         // Apply sigmoid function to score for better confidence distribution
         let normalized_score = score / 3.0f64; // Normalize to 0-1 range
-        analysis.confidence_score = 1.0f64 / (1.0f64 + (-6.0f64 * (normalized_score - 0.5f64)).exp()); // Sigmoid centered at 0.5
+        analysis.confidence_score =
+            1.0f64 / (1.0f64 + (-6.0f64 * (normalized_score - 0.5f64)).exp()); // Sigmoid centered at 0.5
         analysis.is_behind_cdn = analysis.confidence_score >= 0.6;
         analysis.detection_reasons = reasons;
 
         // Generate security implications based on detected providers
         if analysis.is_behind_cdn {
-            analysis.security_implications.push("Traffic is likely protected by CDN WAF".to_string());
-            analysis.security_implications.push("Origin server IP may be hidden from direct access".to_string());
-            analysis.security_implications.push("CDN provides DDoS protection and global caching".to_string());
+            analysis
+                .security_implications
+                .push("Traffic is likely protected by CDN WAF".to_string());
+            analysis
+                .security_implications
+                .push("Origin server IP may be hidden from direct access".to_string());
+            analysis
+                .security_implications
+                .push("CDN provides DDoS protection and global caching".to_string());
 
             // Provider-specific security implications
             if let Some(provider) = &result.cdn_provider {
@@ -648,13 +753,17 @@ impl CdnDetector {
             // Additional implications based on analysis
             if let Some(ttl_analysis) = &result.ttl_analysis {
                 if ttl_analysis.average_ttl > 3600 {
-                    analysis.security_implications.push("Long TTL may delay security updates".to_string());
+                    analysis
+                        .security_implications
+                        .push("Long TTL may delay security updates".to_string());
                 }
             }
 
             if let Some(resp_analysis) = &result.response_time_analysis {
                 if resp_analysis.average_response_time_ms < 50.0 {
-                    analysis.security_implications.push("Very fast responses suggest global edge network".to_string());
+                    analysis
+                        .security_implications
+                        .push("Very fast responses suggest global edge network".to_string());
                 }
             }
         }
@@ -701,9 +810,10 @@ impl CdnDetector {
                 "Known for strong application security features".to_string(),
                 "May use proprietary security technologies".to_string(),
             ],
-            _ => vec![
-                format!("{} provides CDN-level security and DDoS protection", provider),
-            ],
+            _ => vec![format!(
+                "{} provides CDN-level security and DDoS protection",
+                provider
+            )],
         }
     }
 
@@ -714,9 +824,11 @@ impl CdnDetector {
         let avg_ttl = ttls.iter().sum::<u32>() as f64 / ttls.len() as f64;
 
         // Calculate consistency score (lower variance = higher consistency)
-        let variance = ttls.iter()
+        let variance = ttls
+            .iter()
             .map(|&ttl| (ttl as f64 - avg_ttl).powi(2))
-            .sum::<f64>() / ttls.len() as f64;
+            .sum::<f64>()
+            / ttls.len() as f64;
         let consistency_score = 1.0 / (1.0 + variance.sqrt() / avg_ttl);
 
         // Check if TTL is typical for CDN (usually 300-3600 seconds for CDN edge records)
@@ -732,35 +844,42 @@ impl CdnDetector {
     }
 
     /// Analyze geographic distribution of IP addresses
-    async fn analyze_geographic_distribution(&self, ips: &[IpAddr]) -> Result<GeographicDistribution> {
-        // For now, we'll use a simple heuristic based on IP diversity
-        // In a real implementation, you'd use a GeoIP database
+    async fn analyze_geographic_distribution(
+        &self,
+        ips: &[IpAddr],
+    ) -> Result<GeographicDistribution> {
+        let unique_ips: std::collections::HashSet<_> = ips.iter().copied().collect();
 
-        let unique_ips: std::collections::HashSet<_> = ips.iter().collect();
-
-        // Get ASN information for all IPs
-        let mut asns = Vec::new();
-        for ip in ips {
-            if let Ok(asn_info) = self.get_asn_info(*ip).await {
-                asns.push(asn_info.asn);
+        let mut asns = std::collections::HashSet::new();
+        let mut countries = std::collections::HashSet::new();
+        for ip in &unique_ips {
+            if let Ok(info) = self.get_asn_info(*ip).await {
+                asns.insert(info.asn);
+                if let Some(country) = info.country {
+                    countries.insert(country);
+                }
             }
         }
 
-        let unique_asns = asns.into_iter().collect::<std::collections::HashSet<_>>().len();
-        let unique_countries = (unique_ips.len() as f64).sqrt().ceil() as usize; // Rough estimate
-
-        // Consider geographically distributed if we have IPs from different /8 networks
-        let networks: std::collections::HashSet<_> = ips.iter()
-            .filter_map(|ip| {
-                if let IpAddr::V4(ipv4) = ip {
-                    Some(ipv4.octets()[0])
-                } else {
-                    None
+        // Distinct /16 (IPv4) or /32 (IPv6) networks as a spread indicator
+        let networks: std::collections::HashSet<_> = unique_ips
+            .iter()
+            .map(|ip| match ip {
+                IpAddr::V4(v4) => {
+                    let o = v4.octets();
+                    format!("{}.{}", o[0], o[1])
+                }
+                IpAddr::V6(v6) => {
+                    let s = v6.segments();
+                    format!("{:x}:{:x}", s[0], s[1])
                 }
             })
             .collect();
 
-        let is_geographically_distributed = networks.len() > 2 || unique_asns > 3;
+        let unique_asns = asns.len();
+        let unique_countries = countries.len();
+        let is_geographically_distributed =
+            unique_countries > 1 || networks.len() > 2 || unique_asns > 2;
         let distribution_score = if is_geographically_distributed {
             0.8
         } else if networks.len() > 1 || unique_asns > 1 {
@@ -807,9 +926,11 @@ impl CdnDetector {
         let avg_time = response_times.iter().sum::<f64>() / response_times.len() as f64;
 
         // Calculate consistency score
-        let variance = response_times.iter()
+        let variance = response_times
+            .iter()
             .map(|&time| (time - avg_time).powi(2))
-            .sum::<f64>() / response_times.len() as f64;
+            .sum::<f64>()
+            / response_times.len() as f64;
         let consistency_score = 1.0 / (1.0 + variance.sqrt() / avg_time);
 
         // CDN typically provides fast, consistent response times (< 100ms average)

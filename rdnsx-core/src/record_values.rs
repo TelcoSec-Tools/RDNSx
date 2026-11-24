@@ -1,7 +1,7 @@
 //! DNS record value types and implementations
 
-use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 /// DNS record value
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -33,7 +33,11 @@ pub enum RecordValue {
         minimum: u32,
     },
     /// CAA record (Certification Authority Authorization)
-    Caa { flags: u8, tag: String, value: String },
+    Caa {
+        flags: u8,
+        tag: String,
+        value: String,
+    },
     /// CERT record
     Cert {
         cert_type: u16,
@@ -109,9 +113,15 @@ pub enum RecordValue {
         cert_data: Vec<u8>,
     },
     /// URI record
-    Uri { priority: u16, weight: u16, target: String },
+    Uri {
+        priority: u16,
+        weight: u16,
+        target: String,
+    },
     /// Generic record value
     Other(String),
+    /// No data: used for negative answers (NXDOMAIN, SERVFAIL, NODATA...)
+    Empty,
 }
 
 impl std::fmt::Display for RecordValue {
@@ -127,43 +137,113 @@ impl std::fmt::Display for RecordValue {
                 port,
                 target,
             } => write!(f, "{} {} {} {}", priority, weight, port, target),
-            RecordValue::Soa { .. } => write!(f, "SOA"), // SOA is complex, simplified here
+            RecordValue::Soa {
+                mname,
+                rname,
+                serial,
+                refresh,
+                retry,
+                expire,
+                minimum,
+            } => write!(
+                f,
+                "{} {} {} {} {} {} {}",
+                mname, rname, serial, refresh, retry, expire, minimum
+            ),
             RecordValue::Caa { flags, tag, value } => write!(f, "{} {} {}", flags, tag, value),
-            RecordValue::Cert { cert_type, key_tag, algorithm, .. } => {
+            RecordValue::Cert {
+                cert_type,
+                key_tag,
+                algorithm,
+                ..
+            } => {
                 write!(f, "{} {} {}", cert_type, key_tag, algorithm)
             }
-            RecordValue::Dnskey { flags, protocol, algorithm, .. } => {
+            RecordValue::Dnskey {
+                flags,
+                protocol,
+                algorithm,
+                ..
+            } => {
                 write!(f, "{} {} {}", flags, protocol, algorithm)
             }
-            RecordValue::Ds { key_tag, algorithm, digest_type, .. } => {
+            RecordValue::Ds {
+                key_tag,
+                algorithm,
+                digest_type,
+                ..
+            } => {
                 write!(f, "{} {} {}", key_tag, algorithm, digest_type)
             }
             RecordValue::Hinfo { cpu, os } => write!(f, "{} {}", cpu, os),
-            RecordValue::Https { priority, target, params } => {
+            RecordValue::Https {
+                priority,
+                target,
+                params,
+            } => {
                 write!(f, "{} {} {}", priority, target, params.join(" "))
             }
-            RecordValue::Key { flags, protocol, algorithm, .. } => {
+            RecordValue::Key {
+                flags,
+                protocol,
+                algorithm,
+                ..
+            } => {
                 write!(f, "{} {} {}", flags, protocol, algorithm)
             }
-            RecordValue::Loc { latitude, longitude, altitude, .. } => {
+            RecordValue::Loc {
+                latitude,
+                longitude,
+                altitude,
+                ..
+            } => {
                 write!(f, "{} {} {}", latitude, longitude, altitude)
             }
-            RecordValue::Naptr { order, preference, flags, services, regexp, replacement } => {
-                write!(f, "{} {} {} {} {} {}", order, preference, flags, services, regexp, replacement)
+            RecordValue::Naptr {
+                order,
+                preference,
+                flags,
+                services,
+                regexp,
+                replacement,
+            } => {
+                write!(
+                    f,
+                    "{} {} {} {} {} {}",
+                    order, preference, flags, services, regexp, replacement
+                )
             }
-            RecordValue::Sshfp { algorithm, fingerprint_type, .. } => {
+            RecordValue::Sshfp {
+                algorithm,
+                fingerprint_type,
+                ..
+            } => {
                 write!(f, "{} {}", algorithm, fingerprint_type)
             }
-            RecordValue::Svcb { priority, target, params } => {
+            RecordValue::Svcb {
+                priority,
+                target,
+                params,
+            } => {
                 write!(f, "{} {} {}", priority, target, params.join(" "))
             }
-            RecordValue::Tlsa { cert_usage, selector, matching_type, .. } => {
+            RecordValue::Tlsa {
+                cert_usage,
+                selector,
+                matching_type,
+                ..
+            } => {
                 write!(f, "{} {} {}", cert_usage, selector, matching_type)
             }
-            RecordValue::Uri { priority, weight, target } => {
+            RecordValue::Uri {
+                priority,
+                weight,
+                target,
+            } => {
                 write!(f, "{} {} {}", priority, weight, target)
             }
             RecordValue::Other(o) => write!(f, "{}", o),
+            RecordValue::Empty => Ok(()),
         }
     }
 }
