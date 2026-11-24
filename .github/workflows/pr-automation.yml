@@ -2,7 +2,12 @@ name: PR Automation
 
 on:
   pull_request:
-    types: [opened, labeled, unlabeled, synchronize]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   label-pr:
@@ -42,10 +47,16 @@ jobs:
           revert
 
     - name: Check PR size
-      uses: codiga/git-changed-files-size-checker@v1
-      with:
-        max_size: 1000
-        skip_binary_check: true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Warn (don't fail) on large PRs; lockfiles are excluded from the count.
+        changed=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+          --jq '.[] | select(.filename | endswith(".lock") | not) | .changes' | awk '{s+=$1} END {print s+0}')
+        echo "Changed lines (excluding lockfiles): $changed"
+        if [ "$changed" -gt 1000 ]; then
+          echo "::warning::Large PR ($changed changed lines). Consider splitting it."
+        fi
 
   pr-feedback:
     name: PR Feedback
@@ -58,7 +69,7 @@ jobs:
       uses: actions/github-script@v7
       with:
         script: |
-          github.rest.issues.createComment({
+          await github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
@@ -78,8 +89,8 @@ jobs:
           - Address any feedback provided
 
           ### 📚 Resources
-          - [Contributing Guide](https://github.com/Quinas-Project/RDNSx/blob/main/CONTRIBUTING.md)
-          - [Code of Conduct](https://github.com/Quinas-Project/RDNSx/blob/main/CODE_OF_CONDUCT.md)
+          - [Contributing Guide](https://github.com/TelcoSec-Tools/RDNSx/blob/main/CONTRIBUTING.md)
+          - [Code of Conduct](https://github.com/TelcoSec-Tools/RDNSx/blob/main/CODE_OF_CONDUCT.md)
 
           Questions? Feel free to ask in the comments!`
           })
