@@ -43,7 +43,7 @@ toml = "1.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tokio = { version = "1.35", features = ["rt", "macros"] }
 hickory-resolver = { workspace = true }
 [[bench]]
