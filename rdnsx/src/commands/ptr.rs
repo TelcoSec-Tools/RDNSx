@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Args;
-use tokio;
-use rdnsx_core::{DnsxClient, DnsEnumerator, RecordType, ResolverPool, parse_ip_range_limited, reverse_ip};
+use futures::stream::{self, StreamExt};
+use rdnsx_core::{
+    parse_ip_range_limited, reverse_ip, DnsEnumerator, DnsxClient, RecordType, ResolverPool,
+};
 
 use crate::cli::Config;
 use crate::output_writer::OutputWriter;
@@ -26,10 +28,15 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
         concurrency: config.core_config.performance.threads,
         rate_limit: config.core_config.performance.rate_limit,
     };
-    let client = Arc::new(DnsxClient::with_options(dns_options.clone())?);
+    let resolver_pool = Arc::new(ResolverPool::new(&dns_options)?);
+    let client = Arc::new(DnsxClient::from_pool(Arc::clone(&resolver_pool)));
 
     // Create output writer
-    let mut output = OutputWriter::new(config.output_file.clone(), config.json_output, config.silent)?;
+    let mut output = OutputWriter::new(
+        config.output_file.clone(),
+        config.json_output,
+        config.silent,
+    )?;
 
     // Parse input - check if it's an ASN or IP range
     let ips = if args.input.to_uppercase().starts_with("AS") {
@@ -38,19 +45,21 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
             eprintln!("🔍 Enumerating ASN {} for IP ranges...", args.input);
         }
 
-        // Create resolver pool and enumerator for ASN lookup
-        let resolver_pool = Arc::new(ResolverPool::new(&dns_options)?);
-        let enumerator = DnsEnumerator::new(resolver_pool);
+        let enumerator = DnsEnumerator::new(Arc::clone(&resolver_pool));
 
         // Get ASN information
-        let asn_result = enumerator.asn_enumeration(&args.input).await
+        let asn_result = enumerator
+            .asn_enumeration(&args.input)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to enumerate ASN {}: {}", args.input, e))?;
 
         if !config.silent {
-            eprintln!("📊 Found {} IPv4 prefixes and {} IPv6 prefixes for {}",
-                     asn_result.ipv4_prefixes.len(),
-                     asn_result.ipv6_prefixes.len(),
-                     asn_result.asn);
+            eprintln!(
+                "📊 Found {} IPv4 prefixes and {} IPv6 prefixes for {}",
+                asn_result.ipv4_prefixes.len(),
+                asn_result.ipv6_prefixes.len(),
+                asn_result.asn
+            );
         }
 
         // Convert prefixes to IP ranges, but limit to reasonable sizes
@@ -61,7 +70,10 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
             let remaining = max_total.saturating_sub(all_ips.len());
             if remaining == 0 {
                 if !config.silent {
-                    eprintln!("⚠️  Limiting to 10,000 IPs total (ASN {} has many ranges)", args.input);
+                    eprintln!(
+                        "⚠️  Limiting to 10,000 IPs total (ASN {} has many ranges)",
+                        args.input
+                    );
                 }
                 break;
             }
@@ -91,13 +103,17 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
         range_ips
     } else {
         // Single IP address
-        vec![args.input
+        vec![args
+            .input
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid IP address: {}", e))?]
     };
 
     if !config.silent {
-        eprintln!("🔍 Performing PTR lookups for {} IP addresses...", ips.len());
+        eprintln!(
+            "🔍 Performing PTR lookups for {} IP addresses...",
+            ips.len()
+        );
 
         // Show warning for large ranges
         if ips.len() > 1000 {
@@ -105,54 +121,35 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
         }
     }
 
-    // Use concurrent lookups for better performance
-    let concurrency = std::cmp::min(config.core_config.performance.threads, 50); // Cap at 50 concurrent requests
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+    // Bounded concurrency; the resolver pool also enforces the configured rate limit
+    let concurrency = config.core_config.performance.threads.clamp(1, 50);
 
-    // Collect all successful records first
+    let results: Vec<_> = stream::iter(ips)
+        .map(|ip| {
+            let client = Arc::clone(&client);
+            async move {
+                let ptr_domain = reverse_ip(&ip);
+                client.query(&ptr_domain, RecordType::Ptr).await
+            }
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
     let mut all_records = Vec::new();
     let mut success_count = 0;
+    let mut empty_count = 0;
     let mut error_count = 0;
-
-    // Create tasks for concurrent processing
-    let mut tasks = Vec::new();
-
-    for ip in ips {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let ptr_domain = reverse_ip(&ip);
-        let client_task = Arc::clone(&client);
-
-        let task = tokio::spawn(async move {
-            let client_result = client_task.query(&ptr_domain, RecordType::Ptr).await;
-            drop(permit); // Release the permit
-            (ip, ptr_domain, client_result)
-        });
-
-        tasks.push(task);
-    }
-
-    // Process results as they complete
-    for task in tasks {
-        match task.await {
-            Ok((_ip, _ptr_domain, result)) => {
-                match result {
-                    Ok(records) if !records.is_empty() => {
-                        success_count += 1;
-                        all_records.extend(records);
-                    }
-                    Ok(_) => {
-                        // No PTR records found - this is normal, don't count as error
-                        error_count += 1;
-                    }
-                    Err(_) => {
-                        error_count += 1;
-                    }
-                }
+    for result in results {
+        match result {
+            Ok(records) if !records.is_empty() => {
+                success_count += 1;
+                all_records.extend(records);
             }
+            Ok(_) => empty_count += 1,
             Err(e) => {
-                if !config.silent {
-                    eprintln!("Task error: {}", e);
-                }
+                error_count += 1;
+                tracing::debug!("PTR lookup failed: {}", e);
             }
         }
     }
@@ -165,8 +162,12 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
     if !config.silent {
         eprintln!("✅ PTR enumeration completed:");
         eprintln!("   • Successful lookups: {}", success_count);
-        eprintln!("   • Failed/no records: {}", error_count);
-        eprintln!("   • Total processed: {}", success_count + error_count);
+        eprintln!("   • No PTR record: {}", empty_count);
+        eprintln!("   • Failed lookups: {}", error_count);
+        eprintln!(
+            "   • Total processed: {}",
+            success_count + empty_count + error_count
+        );
     }
 
     output.flush()?;

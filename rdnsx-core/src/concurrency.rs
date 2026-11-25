@@ -83,10 +83,7 @@ where
     }
 
     /// Process items concurrently with streaming
-    pub async fn process_stream<I>(
-        &self,
-        items: I,
-    ) -> Result<(Vec<DnsRecord>, ProcessingMetrics)>
+    pub async fn process_stream<I>(&self, items: I) -> Result<(Vec<DnsRecord>, ProcessingMetrics)>
     where
         I: Iterator<Item = T> + Send,
         T: Send + 'static,
@@ -174,8 +171,6 @@ where
 
         Ok((all_records, metrics))
     }
-
-
 }
 
 /// Rate limiter for controlling request frequency
@@ -260,7 +255,8 @@ impl<R: std::io::BufRead> DomainStreamer<R> {
                 Some(Err(e)) => Some(Err(DnsxError::Other(format!("IO error: {}", e)))),
                 None => None,
             }
-        }).filter_map(|result| {
+        })
+        .filter_map(|result| {
             match result {
                 Ok(s) if s.is_empty() => None, // Filter out empty lines
                 other => Some(other),
@@ -284,7 +280,7 @@ impl AdaptiveBatchSizer {
             current_size: initial_size,
             min_size,
             max_size,
-            target_qps: 1000.0, // Target 1000 queries per second
+            target_qps: 1000.0,     // Target 1000 queries per second
             adjustment_factor: 1.2, // Adjust by 20%
         }
     }
@@ -293,12 +289,12 @@ impl AdaptiveBatchSizer {
     pub fn adjust(&mut self, current_qps: f64) {
         if current_qps > self.target_qps * 1.1 {
             // Too fast, increase batch size
-            self.current_size = ((self.current_size as f64 * self.adjustment_factor) as usize)
-                .min(self.max_size);
+            self.current_size =
+                ((self.current_size as f64 * self.adjustment_factor) as usize).min(self.max_size);
         } else if current_qps < self.target_qps * 0.9 {
             // Too slow, decrease batch size
-            self.current_size = ((self.current_size as f64 / self.adjustment_factor) as usize)
-                .max(self.min_size);
+            self.current_size =
+                ((self.current_size as f64 / self.adjustment_factor) as usize).max(self.min_size);
         }
     }
 

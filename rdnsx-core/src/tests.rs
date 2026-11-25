@@ -12,10 +12,22 @@ fn test_record_type_display() {
 #[test]
 fn test_record_type_hickory_conversion() {
     // Test a few key conversions
-    assert_eq!(RecordType::A.to_hickory(), hickory_resolver::proto::rr::RecordType::A);
-    assert_eq!(RecordType::Aaaa.to_hickory(), hickory_resolver::proto::rr::RecordType::AAAA);
-    assert_eq!(RecordType::Caa.to_hickory(), hickory_resolver::proto::rr::RecordType::CAA);
-    assert_eq!(RecordType::Mx.to_hickory(), hickory_resolver::proto::rr::RecordType::MX);
+    assert_eq!(
+        RecordType::A.to_hickory(),
+        hickory_resolver::proto::rr::RecordType::A
+    );
+    assert_eq!(
+        RecordType::Aaaa.to_hickory(),
+        hickory_resolver::proto::rr::RecordType::AAAA
+    );
+    assert_eq!(
+        RecordType::Caa.to_hickory(),
+        hickory_resolver::proto::rr::RecordType::CAA
+    );
+    assert_eq!(
+        RecordType::Mx.to_hickory(),
+        hickory_resolver::proto::rr::RecordType::MX
+    );
 }
 
 #[test]

@@ -109,7 +109,7 @@ Complete documentation is available at **[https://rdnsx.telcosec.net/](https://r
 
 ## 📋 Prerequisites
 
-- **Rust 1.70+** - Install from [rustup.rs](https://rustup.rs/)
+- **Rust 1.94+** - Install from [rustup.rs](https://rustup.rs/)
 - **Cargo** - Rust's package manager (comes with Rust)
 - **Git** - For cloning the repository
 
@@ -129,7 +129,7 @@ Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
 
 **Verify Installation:**
 ```bash
-rustc --version  # Should show 1.70+
+rustc --version  # Should show 1.94+
 cargo --version  # Should show cargo version
 ```
 
@@ -257,15 +257,15 @@ RDNSx provides 11 specialized enumeration techniques for comprehensive DNS recon
 
 | Technique | Command | Description |
 |-----------|---------|-------------|
-| **Zone Transfer** | `zone-transfer` | Attempt DNS zone transfer (AXFR) to retrieve all records |
+| **Zone Transfer** | `zone-transfer` | Attempt AXFR against the zone's authoritative nameservers (or `--axfr-servers`) |
 | **Email Security** | `email-security` | Enumerate SPF, DMARC, DKIM records for email authentication |
 | **CDN Detection** | `cdn-detection` | Detect CDN usage and analyze configuration |
 | **IPv6 Enumeration** | `ipv6-enumeration` | Enumerate IPv6 deployment and addresses |
 | **DNSSEC Analysis** | `dnssec-enumeration` | Analyze DNSSEC configuration and security |
 | **DNSSEC Zone Walking** | `dnssec-zone-walking` | Perform DNSSEC zone walking (NSEC enumeration) |
 | **Wildcard Analysis** | `wildcard-analysis` | Analyze wildcard DNS configurations and bypass techniques |
-| **Passive DNS** | `passive-dns` | Perform passive DNS enumeration using historical data |
-| **Server Fingerprint** | `server-fingerprint` | Fingerprint DNS server capabilities and versions |
+| **Passive DNS** | `passive-dns` | Certificate Transparency names from crt.sh, plus a small active probe |
+| **Server Fingerprint** | `server-fingerprint` | Query a server directly for version.bind, open recursion, EDNS, DNSSEC and TCP |
 | **ASN Enumeration** | `asn-enumeration` | Enumerate ASN information and associated IP ranges |
 | **Comprehensive** | `comprehensive` | Run all enumeration techniques combined |
 
@@ -411,10 +411,24 @@ Global options:
 - `-c, --config`: Configuration file path
 - `-o, --output`: Output file
 - `--json`: JSON output format
-- `--silent`: Minimal output
+- `--silent`: Hide the banner and progress messages (results are still printed)
+- `--timeout`, `-r/--resolvers`, `--rate-limit`, `--threads`: override the config file
 - `--create-config`: Create example configuration file
 
 Command-specific options are documented in `--help` for each command.
+
+### Build features
+
+The database exporters are optional Cargo features (all enabled by default in the CLI).
+For a smaller binary without database drivers:
+
+```bash
+cargo build --release -p rdnsx --no-default-features
+# or pick one: --features export-elasticsearch | export-mongodb | export-cassandra
+```
+
+Library users get no exporters unless they enable `rdnsx-core`'s `elasticsearch`,
+`mongodb` or `cassandra` features.
 
 ## Performance
 
@@ -440,7 +454,8 @@ We welcome contributions from the community! Here's how you can get involved:
 git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx
 cargo build
-cargo test
+cargo test --workspace                       # offline tests
+cargo test --workspace -- --include-ignored  # plus tests that need public DNS
 ```
 
 ### 📊 Project Stats

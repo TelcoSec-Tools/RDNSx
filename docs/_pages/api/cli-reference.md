@@ -19,14 +19,21 @@ changefreq: monthly
 All commands support these global options:
 
 ```
--c, --config <CONFIG>          Configuration file path
+-c, --config <CONFIG>          Configuration file path (or RDNSX_CONFIG)
 -o, --output <OUTPUT>          Output file
     --json                     JSON output format
-    --silent                   Silent mode (minimal output)
+    --silent                   Hide the banner and progress messages (results are still printed)
+    --timeout <SECONDS>        Query timeout (overrides the config file)
+-r, --resolvers <LIST>         Resolvers to use, comma-separated (overrides the config file)
+    --rate-limit <QPS>         Maximum queries per second, 0 = unlimited
+    --threads <N>              Number of concurrent queries
     --create-config <PATH>     Create example configuration file
 -h, --help                     Print help
 -V, --version                  Print version
 ```
+
+Global options can be placed before or after the subcommand. The rate limit and
+concurrency apply to every command (`query`, `bruteforce`, `ptr`, `enumerate`).
 
 ## Commands
 
@@ -72,7 +79,8 @@ OPTIONS:
         --tlsa                             TLSA records
         --uri                              URI records
         --asn                              ASN information
-    -r, --rcode <RCODE>                    Filter by response code (comma-separated)
+        --rcode <RCODE>                    Filter by response code (comma-separated, e.g. NXDOMAIN,SERVFAIL).
+                                           Negative answers are printed as "name [NXDOMAIN]"
     -w, --wildcard-domain <DOMAIN>         Domain for wildcard detection
         --resp-only                        Response values only
 ```
@@ -121,15 +129,15 @@ USAGE:
 
 OPTIONS:
     -d, --domain <DOMAIN>                  Target domain(s)
-    -w, --wordlist <WORDLIST>              Wordlist file or comma-separated words
-    -p, --placeholder <PLACEHOLDER>        Placeholder string (default: FUZZ)
-    -t, --record-type <TYPE>               Record type to query (default: A)
-    -r, --resolvers <RESOLVERS>            Custom resolver list
-        --rate-limit <RATE_LIMIT>          Rate limit (queries per second)
-        --timeout <TIMEOUT>                Query timeout in seconds
-        --retries <RETRIES>                Retry attempts
-        --threads <THREADS>                Concurrency level
+    -w, --wordlist <WORDLIST>              Wordlist file, comma-separated words, or - for stdin
+        --placeholder <PLACEHOLDER>        Placeholder string (default: FUZZ)
+        --record-type <TYPE>               Record type to query (default: A)
+        --no-wildcard-filter               Keep answers that only come from a wildcard record
+    (plus the global options: -r/--resolvers, --rate-limit, --timeout, --threads)
 ```
+
+Wildcard DNS on the target is detected automatically and answers that match the
+wildcard's addresses are dropped.
 
 #### Examples
 
@@ -141,7 +149,7 @@ rdnsx bruteforce --domain example.com --wordlist wordlist.txt
 rdnsx bruteforce -d example.com -w wordlist.txt -r 8.8.8.8,1.1.1.1
 
 # Different record types
-rdnsx bruteforce -d example.com -w wordlist.txt -t CNAME
+rdnsx bruteforce -d example.com -w wordlist.txt --record-type CNAME
 ```
 
 ### `rdnsx ptr`
@@ -150,19 +158,16 @@ Reverse DNS lookups for IP ranges, individual IPs, or ASN.
 
 ```
 USAGE:
-    rdnsx ptr [OPTIONS] <TARGETS>...
+    rdnsx ptr [OPTIONS] <INPUT>
 
 ARGS:
-    <TARGETS>...    IP addresses, CIDR ranges, or ASN (ASxxx)
+    <INPUT>    IP address, CIDR range (capped at 10,000 IPs), or ASN (ASxxx)
 
 OPTIONS:
-    -r, --resolvers <RESOLVERS>            Custom resolver list
-        --rate-limit <RATE_LIMIT>          Rate limit (queries per second)
-        --timeout <TIMEOUT>                Query timeout in seconds
-        --retries <RETRIES>                Retry attempts
-        --threads <THREADS>                Concurrency level
-        --asn                              ASN information
+    (the global options: -r/--resolvers, --rate-limit, --timeout, --threads)
 ```
+
+ASN prefixes come from RIPEstat (falling back to BGPView).
 
 #### Examples
 
@@ -176,8 +181,6 @@ rdnsx ptr 192.168.1.0/24
 # Reverse lookup ASN
 rdnsx ptr AS15169
 
-# Multiple targets
-rdnsx ptr 8.8.8.8 1.1.1.1 192.168.1.0/24
 ```
 
 ### `rdnsx enumerate`
@@ -188,26 +191,34 @@ Advanced DNS enumeration techniques for comprehensive reconnaissance.
 USAGE:
     rdnsx enumerate [OPTIONS] --technique <TECHNIQUE> --target <TARGET>
 
-ARGS:
-    -t, --technique <TECHNIQUE>    Enumeration technique to use [possible values: zone-transfer, email-security, cdn-detection, ipv6-enumeration, server-fingerprint, dnssec-enumeration, dnssec-zone-walking, wildcard-analysis, passive-dns, asn-enumeration, comprehensive]
-        --asn                              ASN information
-        --zone-transfer                    DNS zone transfer (AXFR)
-        --email-security                  SPF, DMARC, DKIM analysis
-        --cdn-detection                   Content delivery network detection
-        --ipv6-enumeration                IPv6 deployment analysis
-        --dnssec-enumeration              DNSSEC configuration analysis
-        --dnssec-zone-walking             DNSSEC NSEC enumeration
-        --wildcard-analysis               Wildcard DNS analysis
-        --passive-dns                     Historical DNS data enumeration
-    -T, --target <TARGET>          Target domain or ASN for enumeration
-
 OPTIONS:
-    -r, --resolvers <RESOLVERS>    Custom resolver list
-        --rate-limit <RATE_LIMIT>  Rate limit (queries per second)
-        --timeout <TIMEOUT>        Query timeout in seconds
-        --retries <RETRIES>        Retry attempts
-    -c, --concurrent <CONCURRENT>  Maximum concurrent enumeration tasks
+    -t, --technique <TECHNIQUE>      zone-transfer, email-security, cdn-detection, ipv6-enumeration,
+                                     server-fingerprint, dnssec-enumeration, dnssec-zone-walking,
+                                     wildcard-analysis, passive-dns, asn-enumeration, comprehensive
+        --target <TARGET>            Target domain, server (for server-fingerprint) or ASN
+        --nameservers <LIST>         Recursive resolvers to use for lookups
+        --axfr-servers <LIST>        Servers to try AXFR against (default: the zone's NS records)
+        --fingerprint-servers <LIST> Servers to fingerprint (default: the target if it is a server,
+                                     otherwise the zone's authoritative nameservers)
+        --max-names <N>              Name limit for DNSSEC zone walking (default: 1000)
+        --concurrent <N>             Maximum concurrent queries
+    (plus the global options)
 ```
+
+What each technique does:
+
+- **zone-transfer**: AXFR over TCP against every address (IPv4 and IPv6) of each authoritative nameserver.
+- **email-security**: SPF, DMARC and DKIM (about 30 common selectors under `_domainkey`).
+- **server-fingerprint**: queries the server directly for `version.bind`, `hostname.bind`, `id.server`
+  (CHAOS), open recursion, EDNS(0), DNSSEC signatures and TCP support.
+- **dnssec-enumeration**: DNSKEY/DS records, RRSIGs and NSEC/NSEC3 from an authoritative server, a DS-to-DNSKEY
+  match check, and full signature validation from the root trust anchor.
+- **dnssec-zone-walking**: follows the NSEC chain from the apex on an authoritative server. NSEC3 zones are
+  detected and reported as not walkable.
+- **cdn-detection**: CNAME chain, provider patterns, and origin ASN/country from the Team Cymru IP-to-ASN DNS
+  service. Provider IP ranges built into the tool are only a fallback and are marked `"source": "heuristic"`.
+- **passive-dns**: Certificate Transparency names from crt.sh (with first/last logged dates), plus an
+  active probe of a few common names (labelled `active_probe`). Failed sources are listed.
 
 #### Examples
 

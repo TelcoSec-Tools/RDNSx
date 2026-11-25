@@ -20,8 +20,11 @@ Thank you for your interest in contributing to RDNSx! We welcome contributions f
    # Build the project
    cargo build
 
-   # Run tests
-   cargo test
+   # Run the offline tests (a mock DNS server, no network needed)
+   cargo test --workspace
+
+   # Also run the tests that need public DNS
+   cargo test --workspace -- --include-ignored
    ```
 
 ## Development Workflow
@@ -35,9 +38,9 @@ Thank you for your interest in contributing to RDNSx! We welcome contributions f
 
 3. **Run tests and linting**:
    ```bash
-   cargo test
-   cargo clippy
-   cargo fmt --check
+   cargo test --workspace
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all -- --check
    ```
 
 4. **Commit your changes**:

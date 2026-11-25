@@ -22,29 +22,25 @@ jobs:
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
 
+    # Both crates declare #![forbid(unsafe_code)], so the compiler enforces this
     - name: Check for unsafe code
       run: |
-        # Count unsafe blocks/functions
-        unsafe_count=$(cargo +nightly rustc -- -Z unstable-options --pretty=expanded src/main.rs 2>/dev/null | grep -c "unsafe" || echo "0")
-        if [ "$unsafe_count" -gt 0 ]; then
-          echo "Found $unsafe_count unsafe blocks in the codebase"
-          exit 1
-        else
-          echo "✅ No unsafe code blocks found"
-        fi
+        grep -q 'forbid(unsafe_code)' rdnsx-core/src/lib.rs
+        grep -q 'forbid(unsafe_code)' rdnsx/src/main.rs
+        echo "✅ unsafe code is forbidden at compile time"
 
     - name: Check documentation
       run: cargo doc --no-deps --document-private-items
 
-    - name: Run all tests with coverage info
-      run: cargo test --verbose -- --nocapture
+    - name: Run all tests
+      run: cargo test --workspace --verbose
 
     - name: Check minimum Rust version compatibility
       run: |
-        # Test with MSRV (minimum supported Rust version)
-        rustup install 1.70.0
-        rustup target add x86_64-unknown-linux-gnu --toolchain 1.70.0
-        cargo +1.70.0 check
+        # MSRV comes from workspace.package.rust-version in Cargo.toml
+        MSRV=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)
+        rustup install "$MSRV" --profile minimal
+        cargo +"$MSRV" check --workspace --locked
 
     - name: Verify workspace structure
       run: |

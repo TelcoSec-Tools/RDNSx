@@ -23,7 +23,12 @@ pub struct MongodbExporter {
 
 impl MongodbExporter {
     /// Create a new MongoDB exporter
-    pub async fn new(url: &str, database: &str, collection: &str, batch_size: usize) -> Result<Self> {
+    pub async fn new(
+        url: &str,
+        database: &str,
+        collection: &str,
+        batch_size: usize,
+    ) -> Result<Self> {
         let client = Client::with_uri_str(url)
             .await
             .map_err(|e| DnsxError::Export(format!("Failed to connect to MongoDB: {}", e)))?;
@@ -65,15 +70,11 @@ impl MongodbExporter {
 /// Ensure indexes exist on collection
 async fn ensure_indexes(collection: &Collection<Document>) -> Result<()> {
     let indexes = vec![
-        IndexModel::builder()
-            .keys(doc! { "domain": 1 })
-            .build(),
+        IndexModel::builder().keys(doc! { "domain": 1 }).build(),
         IndexModel::builder()
             .keys(doc! { "record_type": 1 })
             .build(),
-        IndexModel::builder()
-            .keys(doc! { "timestamp": -1 })
-            .build(),
+        IndexModel::builder().keys(doc! { "timestamp": -1 }).build(),
         IndexModel::builder()
             .keys(doc! { "domain": 1, "record_type": 1 })
             .build(),
@@ -90,7 +91,8 @@ async fn ensure_indexes(collection: &Collection<Document>) -> Result<()> {
 #[async_trait]
 impl Exporter for MongodbExporter {
     async fn export(&self, record: DnsRecord) -> Result<()> {
-        let timestamp = record.timestamp
+        let timestamp = record
+            .timestamp
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;

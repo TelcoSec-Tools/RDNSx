@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Args;
-use rdnsx_core::{DnsEnumerator, ResolverPool, config::DnsxOptions};
+use rdnsx_core::{config::DnsxOptions, DnsEnumerator, ResolverPool};
 
 use crate::cli::Config;
 use crate::output_writer::OutputWriter;
@@ -20,17 +20,27 @@ pub struct EnumerateArgs {
     #[arg(long)]
     pub target: String,
 
-    /// Custom nameservers for enumeration (comma-separated)
+    /// Recursive resolvers to use for lookups (comma-separated; default: from config)
     #[arg(long)]
     pub nameservers: Option<String>,
+
+    /// Servers to attempt AXFR against (comma-separated). Default: the target's
+    /// authoritative nameservers (NS records)
+    #[arg(long)]
+    pub axfr_servers: Option<String>,
+
+    /// Servers to fingerprint (comma-separated). Default: the target itself if it is
+    /// a server, otherwise the target zone's authoritative nameservers
+    #[arg(long)]
+    pub fingerprint_servers: Option<String>,
+
+    /// Maximum names to discover with DNSSEC zone walking
+    #[arg(long, default_value = "1000")]
+    pub max_names: usize,
 
     /// Maximum concurrent enumeration tasks
     #[arg(long, default_value = "10")]
     pub concurrent: usize,
-
-    /// Timeout for enumeration operations (seconds)
-    #[arg(long, default_value = "30")]
-    pub timeout: u64,
 }
 
 /// Enumeration techniques available
@@ -64,7 +74,7 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
     // Create DNS options with custom settings
     let mut dns_options = DnsxOptions {
         resolvers: config.core_config.resolvers.servers.clone(),
-        timeout: std::time::Duration::from_secs(args.timeout),
+        timeout: std::time::Duration::from_secs(config.core_config.resolvers.timeout),
         retries: config.core_config.resolvers.retries,
         concurrency: args.concurrent,
         rate_limit: config.core_config.performance.rate_limit,
@@ -81,11 +91,53 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
     // Create resolver pool and enumerator
     let resolver_pool = Arc::new(ResolverPool::new(&dns_options)?);
     let enumerator = DnsEnumerator::new(resolver_pool.clone());
-    let mut output = OutputWriter::new(config.output_file.clone(), config.json_output, config.silent)?;
+    let mut output = OutputWriter::new(
+        config.output_file.clone(),
+        config.json_output,
+        config.silent,
+    )?;
+
+    let split = |list: &Option<String>| -> Vec<String> {
+        list.as_deref()
+            .map(|l| {
+                l.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    // Empty means "discover the zone's authoritative nameservers"
+    let axfr_servers = split(&args.axfr_servers);
+
+    let needs_fingerprint = matches!(
+        args.technique,
+        EnumerationTechnique::ServerFingerprint | EnumerationTechnique::Comprehensive
+    );
+    let (fingerprint_servers, fingerprint_zone) = if !needs_fingerprint {
+        (Vec::new(), None)
+    } else if args.fingerprint_servers.is_some() {
+        (split(&args.fingerprint_servers), Some(args.target.clone()))
+    } else {
+        let ns = enumerator
+            .authoritative_nameservers(&args.target)
+            .await
+            .unwrap_or_default();
+        if ns.is_empty() {
+            // Not a zone: treat the target as a server address or host name
+            (vec![args.target.clone()], None)
+        } else {
+            (ns, Some(args.target.clone()))
+        }
+    };
+    let fingerprint = FingerprintTargets {
+        servers: &fingerprint_servers,
+        zone: fingerprint_zone.as_deref(),
+    };
 
     match args.technique {
         EnumerationTechnique::ZoneTransfer => {
-            perform_zone_transfer(&enumerator, &args.target, &dns_options.resolvers, &mut output).await?;
+            perform_zone_transfer(&enumerator, &args.target, &axfr_servers, &mut output).await?;
         }
         EnumerationTechnique::EmailSecurity => {
             perform_email_security_enumeration(&enumerator, &args.target, &mut output).await?;
@@ -97,13 +149,15 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
             perform_ipv6_enumeration(&enumerator, &args.target, &mut output).await?;
         }
         EnumerationTechnique::ServerFingerprint => {
-            perform_server_fingerprinting(&enumerator, &args.target, &dns_options.resolvers, &mut output).await?;
+            perform_server_fingerprinting(&enumerator, &args.target, &fingerprint, &mut output)
+                .await?;
         }
         EnumerationTechnique::DnssecEnumeration => {
             perform_dnssec_enumeration(&enumerator, &args.target, &mut output).await?;
         }
         EnumerationTechnique::DnssecZoneWalking => {
-            perform_dnssec_zone_walking(&enumerator, &args.target, &mut output).await?;
+            perform_dnssec_zone_walking(&enumerator, &args.target, args.max_names, &mut output)
+                .await?;
         }
         EnumerationTechnique::WildcardAnalysis => {
             perform_wildcard_analysis(&enumerator, &args.target, &mut output).await?;
@@ -115,7 +169,14 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
             perform_asn_enumeration(&enumerator, &args.target, &mut output).await?;
         }
         EnumerationTechnique::Comprehensive => {
-            perform_comprehensive_enumeration(&enumerator, &args.target, &dns_options.resolvers, &mut output).await?;
+            perform_comprehensive_enumeration(
+                &enumerator,
+                &args.target,
+                &axfr_servers,
+                &fingerprint,
+                &mut output,
+            )
+            .await?;
         }
     }
 
@@ -136,7 +197,11 @@ async fn perform_zone_transfer(
     }
 
     output.write_line(&format!("🔄 Attempting DNS zone transfer for: {}", domain))?;
-    output.write_line(&format!("📡 Using nameservers: {:?}", nameservers))?;
+    if nameservers.is_empty() {
+        output.write_line("📡 Using the zone's authoritative nameservers (NS records)")?;
+    } else {
+        output.write_line(&format!("📡 Using nameservers: {:?}", nameservers))?;
+    }
     output.write_line("")?;
 
     match enumerator.zone_transfer(domain, nameservers).await {
@@ -158,7 +223,10 @@ async fn perform_zone_transfer(
                 }
             }
 
-            output.write_line(&format!("\n📋 Discovered records: {}", result.records.len()))?;
+            output.write_line(&format!(
+                "\n📋 Discovered records: {}",
+                result.records.len()
+            ))?;
 
             if !result.records.is_empty() {
                 output.write_line("\n🔍 Record Summary:")?;
@@ -173,12 +241,16 @@ async fn perform_zone_transfer(
                 }
 
                 output.write_line("\n📄 Detailed Records:")?;
-                for record in result.records.iter().take(20) { // Show first 20 records
+                for record in result.records.iter().take(20) {
+                    // Show first 20 records
                     output.write_line(&format!("  {}", record))?;
                 }
 
                 if result.records.len() > 20 {
-                    output.write_line(&format!("  ... and {} more records", result.records.len() - 20))?;
+                    output.write_line(&format!(
+                        "  ... and {} more records",
+                        result.records.len() - 20
+                    ))?;
                 }
             }
         }
@@ -327,7 +399,10 @@ async fn perform_ipv6_enumeration(
 
     match enumerator.ipv6_enumeration(domain).await {
         Ok(result) => {
-            output.write_line(&format!("🌐 IPv6 Enumeration Results for {}", result.domain))?;
+            output.write_line(&format!(
+                "🌐 IPv6 Enumeration Results for {}",
+                result.domain
+            ))?;
             output.write_line(&"=".repeat(50))?;
 
             if !result.ipv4_addresses.is_empty() {
@@ -345,8 +420,14 @@ async fn perform_ipv6_enumeration(
             }
 
             output.write_line("\n📊 Deployment Analysis:")?;
-            output.write_line(&format!("  • IPv4 addresses: {}", result.ipv4_addresses.len()))?;
-            output.write_line(&format!("  • IPv6 addresses: {}", result.ipv6_addresses.len()))?;
+            output.write_line(&format!(
+                "  • IPv4 addresses: {}",
+                result.ipv4_addresses.len()
+            ))?;
+            output.write_line(&format!(
+                "  • IPv6 addresses: {}",
+                result.ipv6_addresses.len()
+            ))?;
 
             if result.dual_stack {
                 output.write_line("  • 🌐 Dual-stack deployment (IPv4 + IPv6)")?;
@@ -357,7 +438,9 @@ async fn perform_ipv6_enumeration(
             }
 
             if result.ipv6_addresses.is_empty() {
-                output.write_line("\n💡 Recommendation: Consider enabling IPv6 for better connectivity")?;
+                output.write_line(
+                    "\n💡 Recommendation: Consider enabling IPv6 for better connectivity",
+                )?;
             }
         }
         Err(e) => {
@@ -368,37 +451,69 @@ async fn perform_ipv6_enumeration(
     Ok(())
 }
 
+/// Servers to fingerprint and the zone to use for DNSSEC probing
+struct FingerprintTargets<'a> {
+    servers: &'a [String],
+    zone: Option<&'a str>,
+}
+
 async fn perform_server_fingerprinting(
     enumerator: &DnsEnumerator,
-    domain: &str,
-    nameservers: &[String],
+    target: &str,
+    targets: &FingerprintTargets<'_>,
     output: &mut OutputWriter,
 ) -> Result<()> {
     if output.is_json() {
         let mut fingerprints = Vec::new();
-        for ns in nameservers {
-            if let Ok(fingerprint) = enumerator.server_fingerprinting(ns).await {
-                fingerprints.push(fingerprint);
+        for ns in targets.servers {
+            match enumerator
+                .server_fingerprinting_for_zone(ns, targets.zone)
+                .await
+            {
+                Ok(fingerprint) => fingerprints.push(serde_json::to_value(fingerprint)?),
+                Err(e) => {
+                    fingerprints.push(serde_json::json!({ "server": ns, "error": e.to_string() }))
+                }
             }
         }
         output.write_json(&fingerprints)?;
         return Ok(());
     }
 
-    output.write_line(&format!("🔍 Fingerprinting DNS servers for: {}", domain))?;
+    output.write_line(&format!("🔍 Fingerprinting DNS servers for: {}", target))?;
     output.write_line("")?;
 
-    for ns in nameservers {
-        match enumerator.server_fingerprinting(ns).await {
-            Ok(fingerprint) => {
-                output.write_line(&format!("🖥️  DNS Server: {}", fingerprint.server))?;
-                output.write_line(&format!("   Response time: {}ms", fingerprint.response_time_ms))?;
-                output.write_line(&format!("   Recursion: {}", if fingerprint.recursion_available { "✅" } else { "❌" }))?;
-                output.write_line(&format!("   DNSSEC: {}", if fingerprint.dnssec_support { "✅" } else { "❌" }))?;
-                output.write_line(&format!("   EDNS: {}", if fingerprint.edns_support { "✅" } else { "❌" }))?;
-
-                if let Some(version) = &fingerprint.version_bind {
-                    output.write_line(&format!("   Version: {}", version))?;
+    let yes_no = |b: bool| if b { "✅" } else { "❌" };
+    for ns in targets.servers {
+        match enumerator
+            .server_fingerprinting_for_zone(ns, targets.zone)
+            .await
+        {
+            Ok(fp) => {
+                output.write_line(&format!(
+                    "🖥️  DNS Server: {} ({})",
+                    fp.server,
+                    fp.address.as_deref().unwrap_or("?")
+                ))?;
+                output.write_line(&format!("   Response time: {}ms", fp.response_time_ms))?;
+                output.write_line(&format!(
+                    "   Open recursion: {}",
+                    yes_no(fp.recursion_available)
+                ))?;
+                output.write_line(&format!(
+                    "   DNSSEC signatures: {}",
+                    yes_no(fp.dnssec_support)
+                ))?;
+                output.write_line(&format!("   EDNS(0): {}", yes_no(fp.edns_support)))?;
+                output.write_line(&format!("   TCP: {}", yes_no(fp.tcp_support)))?;
+                if let Some(version) = &fp.version_bind {
+                    output.write_line(&format!("   version.bind: {}", version))?;
+                }
+                if let Some(host) = &fp.hostname_bind {
+                    output.write_line(&format!("   hostname.bind: {}", host))?;
+                }
+                if let Some(id) = &fp.id_server {
+                    output.write_line(&format!("   id.server: {}", id))?;
                 }
                 output.write_line("")?;
             }
@@ -422,7 +537,10 @@ async fn perform_dnssec_enumeration(
         return Ok(());
     }
 
-    output.write_line(&format!("🔒 Enumerating DNSSEC configuration for: {}", domain))?;
+    output.write_line(&format!(
+        "🔒 Enumerating DNSSEC configuration for: {}",
+        domain
+    ))?;
     output.write_line("")?;
 
     match enumerator.dnssec_enumeration(domain).await {
@@ -430,21 +548,38 @@ async fn perform_dnssec_enumeration(
             output.write_line(&format!("🔐 DNSSEC Analysis for {}", result.domain))?;
             output.write_line(&"=".repeat(50))?;
 
-            output.write_line(&format!("DNSSEC Status: {}", if result.dnssec_enabled { "✅ Enabled" } else { "❌ Disabled" }))?;
+            output.write_line(&format!(
+                "DNSSEC Status: {}",
+                if result.dnssec_enabled {
+                    "✅ Enabled"
+                } else {
+                    "❌ Disabled"
+                }
+            ))?;
 
             if result.dnssec_enabled {
                 if !result.dnskey_records.is_empty() {
                     output.write_line("\n🔑 DNSKEY Records:")?;
                     for dnskey in &result.dnskey_records {
-                        output.write_line(&format!("  • Key Tag: {}, Algorithm: {}, Flags: {}", dnskey.key_tag, dnskey.algorithm, dnskey.flags))?;
+                        output.write_line(&format!(
+                            "  • Key Tag: {}, Algorithm: {}, Flags: {}",
+                            dnskey.key_tag, dnskey.algorithm, dnskey.flags
+                        ))?;
                     }
                 }
 
                 if !result.ds_records.is_empty() {
                     output.write_line("\n📋 DS Records:")?;
                     for ds in &result.ds_records {
-                        output.write_line(&format!("  • Key Tag: {}, Algorithm: {}, Digest Type: {}", ds.key_tag, ds.algorithm, ds.digest_type))?;
-                        let digest_preview = if ds.digest.len() >= 16 { &ds.digest[..16] } else { &ds.digest };
+                        output.write_line(&format!(
+                            "  • Key Tag: {}, Algorithm: {}, Digest Type: {}",
+                            ds.key_tag, ds.algorithm, ds.digest_type
+                        ))?;
+                        let digest_preview = if ds.digest.len() >= 16 {
+                            &ds.digest[..16]
+                        } else {
+                            &ds.digest
+                        };
                         output.write_line(&format!("    Digest: {}", digest_preview))?;
                     }
                 }
@@ -452,7 +587,21 @@ async fn perform_dnssec_enumeration(
                 output.write_line("\n📊 Record Counts:")?;
                 output.write_line(&format!("  • RRSIG records: {}", result.rrsig_records))?;
                 output.write_line(&format!("  • NSEC records: {}", result.nsec_records))?;
-                output.write_line(&format!("  • NSEC3 records: {}", result.nsec3_records))?;
+                output.write_line(&format!("  • NSEC3PARAM records: {}", result.nsec3_records))?;
+
+                if let Some(chain) = &result.chain_validation {
+                    output.write_line(&format!(
+                        "\n⛓️  Chain of trust: {}",
+                        if chain.chain_valid {
+                            "✅ Valid"
+                        } else {
+                            "❌ Broken"
+                        }
+                    ))?;
+                    if let Some(status) = &chain.trust_anchor_status {
+                        output.write_line(&format!("  • {}", status))?;
+                    }
+                }
 
                 if !result.security_issues.is_empty() {
                     output.write_line("\n⚠️  Security Issues:")?;
@@ -477,23 +626,47 @@ async fn perform_dnssec_enumeration(
 async fn perform_dnssec_zone_walking(
     enumerator: &DnsEnumerator,
     domain: &str,
+    max_names: usize,
     output: &mut OutputWriter,
 ) -> Result<()> {
     if output.is_json() {
-        let result = enumerator.dnssec_zone_walking(domain).await?;
+        let result = enumerator
+            .dnssec_zone_walking_limited(domain, max_names)
+            .await?;
         output.write_json(&result)?;
         return Ok(());
     }
 
-    output.write_line(&format!("🚶 Performing DNSSEC zone walking for: {}", domain))?;
+    output.write_line(&format!(
+        "🚶 Performing DNSSEC zone walking for: {}",
+        domain
+    ))?;
     output.write_line("")?;
 
-    match enumerator.dnssec_zone_walking(domain).await {
+    match enumerator
+        .dnssec_zone_walking_limited(domain, max_names)
+        .await
+    {
         Ok(result) => {
-            output.write_line(&format!("🚶 DNSSEC Zone Walking Results for {}", result.domain))?;
+            output.write_line(&format!(
+                "🚶 DNSSEC Zone Walking Results for {}",
+                result.domain
+            ))?;
             output.write_line(&"=".repeat(50))?;
 
-            output.write_line(&format!("Enumeration Status: {}", if result.enumeration_successful { "✅ Successful" } else { "❌ Failed" }))?;
+            output.write_line(&format!(
+                "Enumeration Status: {}",
+                if result.enumeration_successful {
+                    "✅ Successful"
+                } else {
+                    "❌ Failed"
+                }
+            ))?;
+            output.write_line(&format!("Denial of existence: {}", result.denial_type))?;
+            if let Some(ns) = &result.nameserver {
+                output.write_line(&format!("Nameserver: {}", ns))?;
+            }
+            output.write_line(&format!("Stopped: {}", result.stop_reason))?;
 
             if !result.nsec_chain.is_empty() {
                 output.write_line("\n🔗 NSEC Chain:")?;
@@ -510,9 +683,11 @@ async fn perform_dnssec_zone_walking(
             }
 
             if result.enumeration_successful {
-                output.write_line("\n💡 Zone walking successful - DNSSEC NSEC records can be enumerated")?;
+                output.write_line(
+                    "\n💡 Zone walking successful - DNSSEC NSEC records can be enumerated",
+                )?;
             } else {
-                output.write_line("\n💡 Zone walking not possible - Domain may not use DNSSEC or NSEC")?;
+                output.write_line("\n💡 Zone walking not possible (see the reason above)")?;
             }
         }
         Err(e) => {
@@ -534,16 +709,32 @@ async fn perform_wildcard_analysis(
         return Ok(());
     }
 
-    output.write_line(&format!("🎭 Analyzing wildcard DNS configuration for: {}", domain))?;
+    output.write_line(&format!(
+        "🎭 Analyzing wildcard DNS configuration for: {}",
+        domain
+    ))?;
     output.write_line("")?;
 
     match enumerator.wildcard_analysis(domain).await {
         Ok(analysis) => {
-            output.write_line(&format!("🎭 Wildcard Analysis Results for {}", analysis.domain))?;
+            output.write_line(&format!(
+                "🎭 Wildcard Analysis Results for {}",
+                analysis.domain
+            ))?;
             output.write_line(&"=".repeat(50))?;
 
-            output.write_line(&format!("Wildcard Status: {}", if analysis.has_wildcard { "✅ Detected" } else { "❌ Not Detected" }))?;
-            output.write_line(&format!("Confidence Score: {:.1}%", analysis.confidence_score * 100.0))?;
+            output.write_line(&format!(
+                "Wildcard Status: {}",
+                if analysis.has_wildcard {
+                    "✅ Detected"
+                } else {
+                    "❌ Not Detected"
+                }
+            ))?;
+            output.write_line(&format!(
+                "Confidence Score: {:.1}%",
+                analysis.confidence_score * 100.0
+            ))?;
 
             if !analysis.wildcard_ips.is_empty() {
                 output.write_line("\n🌐 Wildcard IP Addresses:")?;
@@ -558,20 +749,28 @@ async fn perform_wildcard_analysis(
                     output.write_line(&format!("  • {}", record.domain))?;
                 }
                 if analysis.wildcard_records.len() > 3 {
-                    output.write_line(&format!("  ... and {} more test records", analysis.wildcard_records.len() - 3))?;
+                    output.write_line(&format!(
+                        "  ... and {} more test records",
+                        analysis.wildcard_records.len() - 3
+                    ))?;
                 }
             }
 
             if !analysis.bypass_attempts.is_empty() {
                 output.write_line("\n🛡️ Wildcard Bypass Attempts:")?;
-                let successful_bypasses: Vec<_> = analysis.bypass_attempts.iter()
+                let successful_bypasses: Vec<_> = analysis
+                    .bypass_attempts
+                    .iter()
                     .filter(|attempt| attempt.success)
                     .collect();
 
                 if !successful_bypasses.is_empty() {
                     output.write_line("  ✅ Successful bypass techniques:")?;
                     for attempt in &successful_bypasses {
-                        output.write_line(&format!("    • {}: {}", attempt.technique, attempt.test_domain))?;
+                        output.write_line(&format!(
+                            "    • {}: {}",
+                            attempt.technique, attempt.test_domain
+                        ))?;
                     }
                 } else {
                     output.write_line("  ❌ No bypass techniques successful")?;
@@ -586,15 +785,23 @@ async fn perform_wildcard_analysis(
             // Provide recommendations
             output.write_line("\n💡 Recommendations:")?;
             if analysis.has_wildcard {
-                output.write_line("  • Wildcard DNS is active - consider targeted subdomain enumeration")?;
+                output.write_line(
+                    "  • Wildcard DNS is active - consider targeted subdomain enumeration",
+                )?;
                 if analysis.confidence_score > 0.8 {
-                    output.write_line("  • High confidence wildcard detection - most subdomains will resolve")?;
+                    output.write_line(
+                        "  • High confidence wildcard detection - most subdomains will resolve",
+                    )?;
                 }
                 if !analysis.bypass_attempts.is_empty() {
-                    output.write_line("  • Some bypass techniques work - can find non-wildcard domains")?;
+                    output.write_line(
+                        "  • Some bypass techniques work - can find non-wildcard domains",
+                    )?;
                 }
             } else {
-                output.write_line("  • No wildcard DNS detected - standard enumeration should work well")?;
+                output.write_line(
+                    "  • No wildcard DNS detected - standard enumeration should work well",
+                )?;
             }
         }
         Err(e) => {
@@ -616,8 +823,11 @@ async fn perform_passive_dns_enumeration(
         return Ok(());
     }
 
-    output.write_line(&format!("📚 Performing passive DNS enumeration for: {}", domain))?;
-    output.write_line("Note: Queries public Certificate Transparency logs (crt.sh).")?;
+    output.write_line(&format!(
+        "📚 Performing passive DNS enumeration for: {}",
+        domain
+    ))?;
+    output.write_line("Note: queries Certificate Transparency logs (crt.sh) and actively probes a few common names.")?;
     output.write_line("")?;
 
     match enumerator.passive_dns_enumeration(domain).await {
@@ -626,17 +836,22 @@ async fn perform_passive_dns_enumeration(
             output.write_line(&"=".repeat(50))?;
 
             if let Some(last_seen) = result.last_seen {
-                output.write_line(&format!("Last Seen: {}", last_seen.format("%Y-%m-%d %H:%M:%S UTC")))?;
+                output.write_line(&format!(
+                    "Last Seen: {}",
+                    last_seen.format("%Y-%m-%d %H:%M:%S UTC")
+                ))?;
             }
 
             if !result.subdomains.is_empty() {
                 output.write_line("\n🔍 Discovered Subdomains:")?;
                 for subdomain in &result.subdomains {
-                    output.write_line(&format!("  • {} ({}) - First: {}, Last: {}",
-                            subdomain.name,
-                            subdomain.record_type,
-                            subdomain.first_seen.format("%Y-%m-%d"),
-                            subdomain.last_seen.format("%Y-%m-%d")))?;
+                    output.write_line(&format!(
+                        "  • {} ({}) - First: {}, Last: {}",
+                        subdomain.name,
+                        subdomain.record_type,
+                        subdomain.first_seen.format("%Y-%m-%d"),
+                        subdomain.last_seen.format("%Y-%m-%d")
+                    ))?;
                 }
             } else {
                 output.write_line("\n❌ No subdomains discovered")?;
@@ -645,10 +860,12 @@ async fn perform_passive_dns_enumeration(
             if !result.historical_ips.is_empty() {
                 output.write_line("\n🏠 Historical IP Addresses:")?;
                 for historical_ip in &result.historical_ips {
-                    output.write_line(&format!("  • {} - First: {}, Last: {}",
-                            historical_ip.ip,
-                            historical_ip.first_seen.format("%Y-%m-%d"),
-                            historical_ip.last_seen.format("%Y-%m-%d")))?;
+                    output.write_line(&format!(
+                        "  • {} - First: {}, Last: {}",
+                        historical_ip.ip,
+                        historical_ip.first_seen.format("%Y-%m-%d"),
+                        historical_ip.last_seen.format("%Y-%m-%d")
+                    ))?;
                 }
             }
 
@@ -656,6 +873,13 @@ async fn perform_passive_dns_enumeration(
                 output.write_line("\n📊 Data Sources:")?;
                 for source in &result.data_sources {
                     output.write_line(&format!("  • {}", source))?;
+                }
+            }
+
+            if !result.source_errors.is_empty() {
+                output.write_line("\n⚠️  Failed sources:")?;
+                for error in &result.source_errors {
+                    output.write_line(&format!("  • {}", error))?;
                 }
             }
         }
@@ -699,35 +923,58 @@ async fn perform_asn_enumeration(
             }
 
             output.write_line("\n📊 Network Summary:")?;
-            output.write_line(&format!("  • IPv4 prefixes: {}", result.ipv4_prefixes.len()))?;
-            output.write_line(&format!("  • IPv6 prefixes: {}", result.ipv6_prefixes.len()))?;
-            output.write_line(&format!("  • Total IPv4 addresses: {}", result.total_ipv4_addresses))?;
-            output.write_line(&format!("  • Total IPv6 addresses: {}", result.total_ipv6_addresses))?;
+            output.write_line(&format!(
+                "  • IPv4 prefixes: {}",
+                result.ipv4_prefixes.len()
+            ))?;
+            output.write_line(&format!(
+                "  • IPv6 prefixes: {}",
+                result.ipv6_prefixes.len()
+            ))?;
+            output.write_line(&format!(
+                "  • Total IPv4 addresses: {}",
+                result.total_ipv4_addresses
+            ))?;
+            output.write_line(&format!(
+                "  • Total IPv6 addresses: {}",
+                result.total_ipv6_addresses
+            ))?;
 
             if !result.ipv4_prefixes.is_empty() {
                 output.write_line("\n🔢 IPv4 Prefixes:")?;
-                for prefix in result.ipv4_prefixes.iter().take(10) { // Show first 10
+                for prefix in result.ipv4_prefixes.iter().take(10) {
+                    // Show first 10
                     output.write_line(&format!("  • {}", prefix))?;
                 }
                 if result.ipv4_prefixes.len() > 10 {
-                    output.write_line(&format!("  ... and {} more IPv4 prefixes", result.ipv4_prefixes.len() - 10))?;
+                    output.write_line(&format!(
+                        "  ... and {} more IPv4 prefixes",
+                        result.ipv4_prefixes.len() - 10
+                    ))?;
                 }
             }
 
             if !result.ipv6_prefixes.is_empty() {
                 output.write_line("\n🔢 IPv6 Prefixes:")?;
-                for prefix in result.ipv6_prefixes.iter().take(10) { // Show first 10
+                for prefix in result.ipv6_prefixes.iter().take(10) {
+                    // Show first 10
                     output.write_line(&format!("  • {}", prefix))?;
                 }
                 if result.ipv6_prefixes.len() > 10 {
-                    output.write_line(&format!("  ... and {} more IPv6 prefixes", result.ipv6_prefixes.len() - 10))?;
+                    output.write_line(&format!(
+                        "  ... and {} more IPv6 prefixes",
+                        result.ipv6_prefixes.len() - 10
+                    ))?;
                 }
             }
 
             // Provide recommendations
             output.write_line("\n💡 Usage Recommendations:")?;
-            output.write_line("  • Use these IP ranges with PTR enumeration: rdnsx ptr <prefix>")?;
-            output.write_line("  • Combine with subdomain enumeration for comprehensive reconnaissance")?;
+            output
+                .write_line("  • Use these IP ranges with PTR enumeration: rdnsx ptr <prefix>")?;
+            output.write_line(
+                "  • Combine with subdomain enumeration for comprehensive reconnaissance",
+            )?;
             if result.total_ipv4_addresses > 1000000 {
                 output.write_line("  • Large ASN - consider rate limiting for PTR enumeration")?;
             }
@@ -746,26 +993,41 @@ async fn perform_asn_enumeration(
 async fn perform_comprehensive_enumeration(
     enumerator: &DnsEnumerator,
     domain: &str,
-    nameservers: &[String],
+    axfr_servers: &[String],
+    fingerprint: &FingerprintTargets<'_>,
     output: &mut OutputWriter,
 ) -> Result<()> {
     if output.is_json() {
-        let mut fingerprints = Vec::new();
-        for ns in nameservers {
-            if let Ok(fingerprint) = enumerator.server_fingerprinting(ns).await {
-                fingerprints.push(fingerprint);
+        // Report failures instead of silently dropping them
+        fn section<T: serde::Serialize>(result: rdnsx_core::Result<T>) -> serde_json::Value {
+            match result {
+                Ok(value) => serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
+                Err(e) => serde_json::json!({ "error": e.to_string() }),
             }
+        }
+
+        let mut fingerprints = Vec::new();
+        for ns in fingerprint.servers {
+            let mut value = section(
+                enumerator
+                    .server_fingerprinting_for_zone(ns, fingerprint.zone)
+                    .await,
+            );
+            if let Some(obj) = value.as_object_mut() {
+                obj.entry("server").or_insert_with(|| serde_json::json!(ns));
+            }
+            fingerprints.push(value);
         }
 
         let comprehensive = serde_json::json!({
             "domain": domain,
-            "zone_transfer": enumerator.zone_transfer(domain, nameservers).await.ok(),
-            "dnssec": enumerator.dnssec_enumeration(domain).await.ok(),
-            "wildcard_analysis": enumerator.wildcard_analysis(domain).await.ok(),
-            "passive_dns": enumerator.passive_dns_enumeration(domain).await.ok(),
-            "email_security": enumerator.email_security_enumeration(domain).await.ok(),
-            "cdn_detection": enumerator.cdn_detection(domain).await.ok(),
-            "ipv6_enumeration": enumerator.ipv6_enumeration(domain).await.ok(),
+            "zone_transfer": section(enumerator.zone_transfer(domain, axfr_servers).await),
+            "dnssec": section(enumerator.dnssec_enumeration(domain).await),
+            "wildcard_analysis": section(enumerator.wildcard_analysis(domain).await),
+            "passive_dns": section(enumerator.passive_dns_enumeration(domain).await),
+            "email_security": section(enumerator.email_security_enumeration(domain).await),
+            "cdn_detection": section(enumerator.cdn_detection(domain).await),
+            "ipv6_enumeration": section(enumerator.ipv6_enumeration(domain).await),
             "server_fingerprints": fingerprints,
         });
 
@@ -773,12 +1035,15 @@ async fn perform_comprehensive_enumeration(
         return Ok(());
     }
 
-    output.write_line(&format!("🔬 Performing comprehensive DNS enumeration for: {}", domain))?;
+    output.write_line(&format!(
+        "🔬 Performing comprehensive DNS enumeration for: {}",
+        domain
+    ))?;
     output.write_line(&"=".repeat(60))?;
     output.write_line("")?;
 
     // Zone Transfer
-    if let Err(e) = perform_zone_transfer(enumerator, domain, nameservers, output).await {
+    if let Err(e) = perform_zone_transfer(enumerator, domain, axfr_servers, output).await {
         eprintln!("Zone transfer enumeration failed: {}", e);
     }
 
@@ -827,7 +1092,7 @@ async fn perform_comprehensive_enumeration(
     output.write_line(&format!("\n{}\n", "=".repeat(60)))?;
 
     // Server Fingerprinting
-    if let Err(e) = perform_server_fingerprinting(enumerator, domain, nameservers, output).await {
+    if let Err(e) = perform_server_fingerprinting(enumerator, domain, fingerprint, output).await {
         eprintln!("Server fingerprinting failed: {}", e);
     }
 
