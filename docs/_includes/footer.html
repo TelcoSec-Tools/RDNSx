@@ -15,5 +15,108 @@
         <span class="text-small text-gray">© 2024 {{ site.social.name }}</span>
       </div>
     </div>
+
+    <!-- Newsletter Signup -->
+    {%- include newsletter-signup.html -%}
+
+    <!-- Footer Links -->
+    <div class="footer-links">
+      <div class="container-lg px-3 py-3">
+        <div class="d-flex flex-justify-between flex-wrap">
+          <div class="footer-section">
+            <h4>Documentation</h4>
+            <ul>
+              <li><a href="{{ '/guide/quick-start' | relative_url }}">Quick Start</a></li>
+              <li><a href="{{ '/guide/installation' | relative_url }}">Installation</a></li>
+              <li><a href="{{ '/api/cli-reference' | relative_url }}">CLI Reference</a></li>
+              <li><a href="{{ '/faq' | relative_url }}">FAQ</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-section">
+            <h4>Community</h4>
+            <ul>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}" target="_blank">GitHub</a></li>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/issues" target="_blank">Issues</a></li>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/discussions" target="_blank">Discussions</a></li>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/releases" target="_blank">Releases</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-section">
+            <h4>Resources</h4>
+            <ul>
+              <li><a href="{{ '/guide/dns-records' | relative_url }}">DNS Records</a></li>
+              <li><a href="{{ '/guide/configuration' | relative_url }}">Configuration</a></li>
+              <li><a href="https://docs.rs/rdnsx-core" target="_blank">API Docs</a></li>
+              <li><a href="https://crates.io/crates/rdnsx" target="_blank">Crates.io</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-section">
+            <h4>Legal</h4>
+            <ul>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/blob/main/LICENSE" target="_blank">License</a></li>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/blob/main/CODE_OF_CONDUCT.md" target="_blank">Code of Conduct</a></li>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/blob/main/CONTRIBUTING.md" target="_blank">Contributing</a></li>
+              <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}/security/policy" target="_blank">Security</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </footer>
+
+<style>
+.footer-links {
+  background: #f6f8fa;
+  border-top: 1px solid #d1d9e0;
+  margin-top: 2rem;
+}
+
+.footer-links .footer-section {
+  flex: 1;
+  min-width: 200px;
+  margin-bottom: 1rem;
+}
+
+.footer-links .footer-section h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #24292f;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.footer-links ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.footer-links li {
+  margin-bottom: 0.25rem;
+}
+
+.footer-links a {
+  color: #0969da;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.footer-links a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .footer-links .d-flex {
+    flex-direction: column;
+  }
+
+  .footer-links .footer-section {
+    margin-bottom: 1.5rem;
+  }
+}
+</style>

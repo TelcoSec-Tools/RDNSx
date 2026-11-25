@@ -8,7 +8,7 @@ This document explains how to build and run RDNSx using Docker.
 
 ```bash
 # Using the build script
-./build-docker.sh
+./scripts/build-docker.sh
 
 # Or manually
 docker build -t rdnsx:latest .
@@ -89,10 +89,10 @@ docker run --rm rdnsx:latest query --resolvers "208.67.222.222,208.67.220.220" -
 
 ```bash
 # Create resolver list
-echo -e "8.8.8.8\n8.8.4.4\n1.1.1.1" > resolvers.txt
+echo -e "8.8.8.8\n8.8.4.4\n1.1.1.1" > config/resolvers.txt
 
 # Use resolvers from file
-docker run --rm -v $(pwd)/resolvers.txt:/resolvers.txt rdnsx:latest query --resolvers /resolvers.txt -d example.com
+docker run --rm -v $(pwd)/config/resolvers.txt:/resolvers.txt rdnsx:latest query --resolvers /resolvers.txt -d example.com
 ```
 
 ### Docker Network DNS
@@ -141,7 +141,7 @@ docker run --rm -v /path/to/wordlists:/app/wordlists rdnsx:latest bruteforce -d 
 docker run --rm -v /path/to/output:/app/output rdnsx:latest query -d example.com -o /app/output/results.json
 
 # Mount configuration files
-docker run --rm -v /path/to/config:/app/config rdnsx:latest --config /app/config/rdnsx.toml query -d example.com
+docker run --rm -v $(pwd)/config:/app/config rdnsx:latest --config /app/config/rdnsx.toml query -d example.com
 ```
 
 ### Environment Variables

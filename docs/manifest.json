@@ -1,0 +1,72 @@
+{
+  "name": "RDNSx Documentation",
+  "short_name": "RDNSx Docs",
+  "description": "Complete documentation for RDNSx, a high-performance DNS toolkit written in Rust",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2f363d",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en-US",
+  "categories": ["developer tools", "documentation", "productivity"],
+  "icons": [
+    {
+      "src": "/assets/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick Start",
+      "short_name": "Quick Start",
+      "description": "Get started with RDNSx quickly",
+      "url": "/guide/quick-start/",
+      "icons": [
+        {
+          "src": "/assets/images/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "CLI Reference",
+      "short_name": "CLI",
+      "description": "Complete command reference",
+      "url": "/api/cli-reference/",
+      "icons": [
+        {
+          "src": "/assets/images/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "DNS Records",
+      "short_name": "DNS Types",
+      "description": "All supported DNS record types",
+      "url": "/guide/dns-records/",
+      "icons": [
+        {
+          "src": "/assets/images/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://rdnsx.telcosec.net/manifest.json"
+    }
+  ],
+  "prefer_related_applications": false
+}

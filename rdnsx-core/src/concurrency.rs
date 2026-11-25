@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 use futures::stream::{self, StreamExt};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
-use tracing::{debug, warn, info};
+use tracing::{info, warn};
 
 use crate::error::{DnsxError, Result};
-use crate::types::{DnsRecord, RecordType};
+use crate::types::DnsRecord;
 
 /// Configuration for concurrent processing
 #[derive(Debug, Clone)]
@@ -54,9 +54,21 @@ pub struct ConcurrentProcessor<T, F> {
     _phantom: std::marker::PhantomData<T>,
 }
 
+impl<T, F> ConcurrentProcessor<T, F> {
+    /// Get the concurrency config
+    pub fn config(&self) -> &ConcurrencyConfig {
+        &self.config
+    }
+
+    /// Get the query function
+    pub fn query_fn(&self) -> &Arc<F> {
+        &self.query_fn
+    }
+}
+
 impl<T, F> ConcurrentProcessor<T, F>
 where
-    T: Send + 'static,
+    T: Send + Clone + 'static,
     F: Fn(T) -> futures::future::BoxFuture<'static, Result<Vec<DnsRecord>>> + Send + Sync + 'static,
 {
     /// Create a new concurrent processor
@@ -71,10 +83,7 @@ where
     }
 
     /// Process items concurrently with streaming
-    pub async fn process_stream<I>(
-        &self,
-        items: I,
-    ) -> Result<(Vec<DnsRecord>, ProcessingMetrics)>
+    pub async fn process_stream<I>(&self, items: I) -> Result<(Vec<DnsRecord>, ProcessingMetrics)>
     where
         I: Iterator<Item = T> + Send,
         T: Send + 'static,
@@ -90,29 +99,63 @@ where
             None
         };
 
-        // Process items in batches to manage memory
-        let items_vec: Vec<T> = items.collect();
-        metrics.total_domains = items_vec.len();
+        let mut count = 0;
+        let semaphore = Arc::clone(&self.semaphore);
+        let query_fn = Arc::clone(&self.query_fn);
+        let timeout_duration = self.config.timeout;
 
-        let chunks = items_vec.chunks(self.config.batch_size);
+        let mut stream = stream::iter(items)
+            .map(|item| {
+                let semaphore = Arc::clone(&semaphore);
+                let query_fn = Arc::clone(&query_fn);
+                let rate_limiter = rate_limiter.clone();
 
-        for chunk in chunks {
-            debug!("Processing batch of {} items", chunk.len());
+                async move {
+                    let _permit = semaphore.acquire().await.unwrap();
 
-            let batch_start = Instant::now();
-            let batch_records = self.process_batch(chunk, &rate_limiter).await?;
-            let batch_time = batch_start.elapsed();
+                    // Apply rate limiting if configured
+                    if let Some(ref limiter) = rate_limiter {
+                        limiter.wait().await;
+                    }
 
-            all_records.extend(batch_records);
-            metrics.total_query_time += batch_time;
+                    // Execute query with timeout
+                    let result = timeout(timeout_duration, query_fn(item)).await;
 
-            debug!("Batch completed in {:.2}s", batch_time.as_secs_f64());
+                    match result {
+                        Ok(Ok(records)) => Ok::<_, DnsxError>(records),
+                        Ok(Err(e)) => {
+                            warn!("Query failed: {}", e);
+                            Ok(Vec::new())
+                        }
+                        Err(_) => {
+                            warn!("Query timed out");
+                            Ok(Vec::new())
+                        }
+                    }
+                }
+            })
+            .buffer_unordered(self.config.max_concurrent);
+
+        while let Some(result) = stream.next().await {
+            count += 1;
+            match result {
+                Ok(records) => {
+                    all_records.extend(records);
+                    metrics.successful_queries += 1;
+                }
+                Err(e) => {
+                    warn!("Stream processing error: {}", e);
+                    metrics.failed_queries += 1;
+                }
+            }
         }
+
+        metrics.total_domains = count;
 
         // Calculate final metrics
         let total_time = start_time.elapsed();
         if metrics.total_domains > 0 {
-            metrics.average_query_time = metrics.total_query_time / metrics.total_domains as u32;
+            metrics.average_query_time = total_time / metrics.total_domains as u32;
         }
         if total_time.as_secs_f64() > 0.0 {
             metrics.queries_per_second = metrics.total_domains as f64 / total_time.as_secs_f64();
@@ -128,64 +171,6 @@ where
 
         Ok((all_records, metrics))
     }
-
-    /// Process a batch of items concurrently
-    async fn process_batch(
-        &self,
-        items: &[T],
-        rate_limiter: &Option<RateLimiter>,
-    ) -> Result<Vec<DnsRecord>>
-    where
-        T: Clone + Send + 'static,
-    {
-        let futures = stream::iter(items.iter().cloned())
-            .map(|item| {
-                let semaphore = Arc::clone(&self.semaphore);
-                let query_fn = Arc::clone(&self.query_fn);
-                let rate_limiter = rate_limiter.clone();
-
-                async move {
-                    let _permit = semaphore.acquire().await.unwrap();
-
-                    // Apply rate limiting if configured
-                    if let Some(ref limiter) = rate_limiter {
-                        limiter.wait().await;
-                    }
-
-                    // Execute query with timeout
-                    let result = timeout(self.config.timeout, query_fn(item)).await;
-
-                    match result {
-                        Ok(Ok(records)) => Ok(records),
-                        Ok(Err(e)) => {
-                            warn!("Query failed: {}", e);
-                            Ok(Vec::new()) // Return empty vec for failed queries
-                        }
-                        Err(_) => {
-                            warn!("Query timed out");
-                            Ok(Vec::new())
-                        }
-                    }
-                }
-            })
-            .buffer_unordered(self.config.max_concurrent);
-
-        let results: Vec<Result<Vec<DnsRecord>>> = futures.collect().await;
-        let mut all_records = Vec::new();
-
-        for result in results {
-            match result {
-                Ok(records) => {
-                    all_records.extend(records);
-                }
-                Err(e) => {
-                    warn!("Batch processing error: {}", e);
-                }
-            }
-        }
-
-        Ok(all_records)
-    }
 }
 
 /// Rate limiter for controlling request frequency
@@ -198,11 +183,10 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter
     pub fn new(requests_per_second: u64) -> Self {
-        let interval = if requests_per_second > 0 {
-            Duration::from_micros(1_000_000 / requests_per_second)
-        } else {
-            Duration::from_micros(0)
-        };
+        let interval = 1_000_000u64
+            .checked_div(requests_per_second)
+            .map(Duration::from_micros)
+            .unwrap_or(Duration::from_micros(0));
 
         Self {
             interval,
@@ -210,22 +194,27 @@ impl RateLimiter {
         }
     }
 
-    /// Wait until the next request can be made
+    /// Wait until the next request can be made without holding lock across await
     pub async fn wait(&self) {
         if self.interval.as_micros() == 0 {
             return;
         }
 
-        let mut last_request = self.last_request.lock().unwrap();
-        let now = Instant::now();
-        let elapsed = now.duration_since(*last_request);
+        let sleep_duration = {
+            let mut last_request = self.last_request.lock().unwrap();
+            let now = Instant::now();
+            let scheduled = if *last_request > now {
+                *last_request + self.interval
+            } else {
+                now + self.interval
+            };
+            *last_request = scheduled;
+            scheduled.saturating_duration_since(now)
+        };
 
-        if elapsed < self.interval {
-            let sleep_duration = self.interval - elapsed;
+        if !sleep_duration.is_zero() {
             tokio::time::sleep(sleep_duration).await;
         }
-
-        *last_request = Instant::now();
     }
 }
 
@@ -263,10 +252,11 @@ impl<R: std::io::BufRead> DomainStreamer<R> {
                         Some(Ok(trimmed.to_string()))
                     }
                 }
-                Some(Err(e)) => Some(Err(DnsxError::Io(e))),
+                Some(Err(e)) => Some(Err(DnsxError::Other(format!("IO error: {}", e)))),
                 None => None,
             }
-        }).filter_map(|result| {
+        })
+        .filter_map(|result| {
             match result {
                 Ok(s) if s.is_empty() => None, // Filter out empty lines
                 other => Some(other),
@@ -290,7 +280,7 @@ impl AdaptiveBatchSizer {
             current_size: initial_size,
             min_size,
             max_size,
-            target_qps: 1000.0, // Target 1000 queries per second
+            target_qps: 1000.0,     // Target 1000 queries per second
             adjustment_factor: 1.2, // Adjust by 20%
         }
     }
@@ -299,12 +289,12 @@ impl AdaptiveBatchSizer {
     pub fn adjust(&mut self, current_qps: f64) {
         if current_qps > self.target_qps * 1.1 {
             // Too fast, increase batch size
-            self.current_size = ((self.current_size as f64 * self.adjustment_factor) as usize)
-                .min(self.max_size);
+            self.current_size =
+                ((self.current_size as f64 * self.adjustment_factor) as usize).min(self.max_size);
         } else if current_qps < self.target_qps * 0.9 {
             // Too slow, decrease batch size
-            self.current_size = ((self.current_size as f64 / self.adjustment_factor) as usize)
-                .max(self.min_size);
+            self.current_size =
+                ((self.current_size as f64 / self.adjustment_factor) as usize).max(self.min_size);
         }
     }
 
@@ -340,7 +330,8 @@ mod tests {
         assert!(sizer.current_size() > 100);
 
         // Test decreasing batch size (low QPS)
+        let before_decrease = sizer.current_size();
         sizer.adjust(800.0);
-        assert!(sizer.current_size() < sizer.current_size);
+        assert!(sizer.current_size() < before_decrease);
     }
 }

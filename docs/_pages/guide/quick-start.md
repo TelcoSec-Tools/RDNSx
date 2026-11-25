@@ -1,8 +1,15 @@
 ---
 layout: page
-title: Quick Start
-description: "Get started with RDNSx in minutes"
+title: "RDNSx Quick Start Guide"
+description: "Get started with RDNSx DNS toolkit in minutes. Learn basic DNS queries, ASN enumeration, and advanced enumeration techniques."
+keywords: "RDNSx quick start, DNS queries, ASN enumeration, reverse DNS, getting started, tutorial"
+og_image: /assets/images/logo.svg
+twitter_card: summary_large_image
+author: "TelcoSec"
+lang: en-US
 permalink: /guide/quick-start/
+priority: 0.9
+changefreq: monthly
 ---
 
 # Quick Start
@@ -25,7 +32,7 @@ Output:
 ██║  ██║██████╔╝██║ ╚████║███████║██╔╝ ██╗
 ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
 
-          Quinas Project by RFS
+              TelcoSec RDNSx
     Fast and multi-purpose DNS toolkit
 
 example.com 300 IN A 93.184.216.34
@@ -104,7 +111,7 @@ rdnsx query example.com --resp-only
 
 ### Create Default Config
 ```bash
-rdnsx --create-config rdnsx.toml
+rdnsx --create-config config/rdnsx.toml
 ```
 
 ### Use Custom Config
@@ -129,11 +136,51 @@ rdnsx query --timeout 10 domains.txt
 rdnsx query --rate-limit 50 domains.txt
 ```
 
+## Advanced Enumeration
+
+### ASN Enumeration
+Discover IP ranges and network information for Autonomous Systems:
+
+```bash
+# Enumerate Google ASN
+rdnsx enumerate --technique asn-enumeration --target AS15169
+
+# Enumerate Amazon ASN
+rdnsx enumerate --technique asn-enumeration --target 16509
+```
+
+### Enhanced PTR Lookups
+Perform reverse DNS lookups with ASN integration:
+
+```bash
+# PTR lookup for Google ASN (uses ASN enumeration results)
+rdnsx ptr AS15169
+
+# Smart IP range handling (auto-limits large ranges)
+rdnsx ptr 192.168.0.0/16
+
+# Concurrent processing for better performance
+rdnsx ptr 8.8.8.0/24
+```
+
+### Comprehensive DNS Analysis
+Run all 11 enumeration techniques on a target for complete reconnaissance:
+
+```bash
+rdnsx enumerate --technique comprehensive --target example.com
+```
+
+**Available Techniques:**
+- Zone transfers, DNSSEC analysis, CDN detection
+- Email security (SPF/DMARC/DKIM), IPv6 enumeration
+- Wildcard analysis, ASN enumeration, server fingerprinting
+- And more advanced security research tools
+
 ## Next Steps
 
 Now that you know the basics, explore:
 
-- [DNS Record Types](dns-records) - Learn about all supported record types
+- [DNS Record Types](dns-records) - Complete reference for all 27 supported record types
 - [CLI Reference](../api/cli-reference) - Complete command documentation
 - [Configuration](configuration) - Advanced configuration options
 - [Database Exports](exports) - Export results to databases

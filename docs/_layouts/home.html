@@ -2,7 +2,7 @@
 layout: default
 ---
 
-<div class="hero">
+<div class="hero" style="background-image: url('{{ '/assets/images/cover.jpg' | relative_url }}'); background-size: cover; background-position: center; background-repeat: no-repeat; min-height: 400px; display: flex; align-items: center;">
   <div class="container-lg px-3">
     <h1>{{ page.title | default: site.title }}</h1>
     <p class="hero-description">{{ page.description | default: site.description }}</p>

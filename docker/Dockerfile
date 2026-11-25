@@ -1,6 +1,7 @@
 # Multi-stage build for RDNSx DNS toolkit
 # Build stage
-FROM rust:1.92-slim-bookworm AS builder
+# Must be at least workspace.package.rust-version (Cargo.toml)
+FROM rust:1-slim-bookworm AS builder
 
 # Install required build dependencies
 RUN apt-get update && apt-get install -y \
@@ -11,8 +12,8 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
-# Copy workspace configuration
-COPY Cargo.toml ./
+# Copy workspace configuration and the lock file (reproducible builds)
+COPY Cargo.toml Cargo.lock ./
 
 # Copy package configurations
 COPY rdnsx-core/Cargo.toml rdnsx-core/
@@ -20,10 +21,11 @@ COPY rdnsx/Cargo.toml rdnsx/
 
 # Copy actual source files for dependency building
 COPY rdnsx-core/src rdnsx-core/src/
+COPY rdnsx-core/benches rdnsx-core/benches/
 COPY rdnsx/src rdnsx/src/
 
 # Build the application
-RUN cargo build --release --workspace
+RUN cargo build --release --locked --bin rdnsx
 
 # Runtime stage
 FROM debian:bookworm-slim

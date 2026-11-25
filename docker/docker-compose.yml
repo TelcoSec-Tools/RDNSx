@@ -3,8 +3,8 @@ version: '3.8'
 services:
   rdnsx:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: rdnsx
     # Override the default command if needed
     # command: ["query", "--resolvers", "8.8.8.8,8.8.4.4", "-d", "example.com", "-a"]

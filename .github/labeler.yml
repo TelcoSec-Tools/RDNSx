@@ -2,77 +2,77 @@
 
 # Rust files
 rust:
-  - rdnsx/**/*.rs
-  - rdnsx-core/**/*.rs
+  - changed-files:
+      - any-glob-to-any-file:
+          - rdnsx/**/*.rs
+          - rdnsx-core/**/*.rs
 
 # Documentation
 documentation:
-  - docs/**/*
-  - README.md
-  - CHANGELOG.md
-  - CONTRIBUTING.md
-  - INSTALL.md
-  - DOCKER_README.md
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**/*
+          - README.md
+          - CHANGELOG.md
+          - CONTRIBUTING.md
+          - INSTALL.md
+          - docker/DOCKER_README.md
 
 # CI/CD
 ci:
-  - .github/workflows/**/*
-  - .github/dependabot.yml
-  - .github/labeler.yml
-  - Dockerfile
-  - docker-compose.yml
-  - build-docker.sh
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/**/*
+          - .github/dependabot.yml
+          - .github/labeler.yml
+          - docker/Dockerfile
+          - docker/docker-compose.yml
+          - scripts/build-docker.sh
 
 # Dependencies
 dependencies:
-  - Cargo.toml
-  - Cargo.lock
-  - rdnsx/Cargo.toml
-  - rdnsx-core/Cargo.toml
-  - docs/Gemfile*
+  - changed-files:
+      - any-glob-to-any-file:
+          - Cargo.toml
+          - Cargo.lock
+          - rdnsx/Cargo.toml
+          - rdnsx-core/Cargo.toml
+          - docs/Gemfile*
 
 # Testing
 testing:
-  - rdnsx-core/tests/**/*
-  - test_*.rs
-  - test_*.txt
+  - changed-files:
+      - any-glob-to-any-file:
+          - rdnsx-core/tests/**/*
+          - test_*.rs
+          - test_*.txt
 
 # Configuration
 config:
-  - rdnsx.toml
-  - resolvers.txt
-  - .gitignore
+  - changed-files:
+      - any-glob-to-any-file:
+          - config/rdnsx.toml
+          - config/resolvers.txt
+          - .gitignore
 
 # Security
 security:
-  - .github/workflows/security.yml
-  - SECURITY.md
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/security.yml
+          - SECURITY.md
 
 # Performance
 performance:
-  - rdnsx-core/benches/**/*
-  - rdnsx-core/src/resolver.rs
-  - rdnsx-core/src/client.rs
+  - changed-files:
+      - any-glob-to-any-file:
+          - rdnsx-core/benches/**/*
+          - rdnsx-core/src/resolver.rs
+          - rdnsx-core/src/client.rs
 
-# Bug fixes
+# Labels from the branch name
 bug:
-  - any:
-      - 'fix'
-      - 'bug'
-      - 'error'
-      - 'crash'
-      - 'panic'
+  - head-branch: ['^fix', '^bug', '^hotfix']
 
-# Features
 enhancement:
-  - any:
-      - 'feat'
-      - 'feature'
-      - 'add'
-
-# Breaking changes
-breaking-change:
-  - any:
-      - 'BREAKING'
-      - 'breaking'
-      - 'major'
+  - head-branch: ['^feat', '^feature']

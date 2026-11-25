@@ -14,7 +14,7 @@ RDNSx supports extensive configuration through TOML files, command-line argument
 Create a configuration file:
 
 ```bash
-rdnsx --create-config rdnsx.toml
+rdnsx --create-config config/rdnsx.toml
 ```
 
 ## Configuration Sections
@@ -127,7 +127,12 @@ RDNSx respects these environment variables:
 - `RDNSX_ES_URL` - Elasticsearch URL
 - `RDNSX_ES_INDEX` - Elasticsearch index name
 - `RDNSX_MONGODB_URL` - MongoDB connection URL
-- `RDNSX_CASSANDRA_CONTACT_POINTS` - Cassandra contact points
+- `RDNSX_CASSANDRA_CONTACT_POINTS` - Cassandra contact points (comma-separated)
+- `RDNSX_CASSANDRA_USERNAME` / `RDNSX_CASSANDRA_PASSWORD` - Cassandra credentials (keeps them out of the TOML file)
+
+Precedence: command-line flags, then environment variables, then the config file.
+A config file given with `--config` or `RDNSX_CONFIG` must exist and parse; RDNSx
+stops with an error instead of silently using defaults.
 
 ## Command-Line Overrides
 
@@ -176,7 +181,7 @@ RDNSx validates configuration on startup:
 
 ```bash
 # Test configuration
-rdnsx --config rdnsx.toml --help
+rdnsx --config config/rdnsx.toml --help
 ```
 
 Invalid configurations will display error messages with suggestions.
