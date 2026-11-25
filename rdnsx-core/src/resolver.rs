@@ -1,11 +1,13 @@
 //! DNS resolver pool implementation
 
+use crate::hickory_ext::LookupExt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::config::{ResolveHosts, ResolverConfig, ResolverOpts};
+use hickory_resolver::net::{DnsError, NetError};
 use hickory_resolver::proto::rr::RData;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use tokio::sync::Semaphore;
 use tracing::{debug, trace, warn};
 
@@ -18,7 +20,7 @@ use crate::utils;
 /// DNS resolver pool with connection reuse
 pub struct ResolverPool {
     /// Resolvers with their addresses; the first one is the primary
-    resolvers: Vec<(Arc<TokioAsyncResolver>, String)>,
+    resolvers: Vec<(Arc<TokioResolver>, String)>,
     /// Concurrency semaphore
     semaphore: Arc<Semaphore>,
     /// Query timeout
@@ -45,7 +47,7 @@ fn empty_lookup(
 ) -> hickory_resolver::lookup::Lookup {
     hickory_resolver::lookup::Lookup::new_with_max_ttl(
         hickory_resolver::proto::op::Query::query(name.clone(), record_type.to_hickory()),
-        Arc::new([]),
+        Vec::new(),
     )
 }
 
@@ -69,13 +71,13 @@ impl ResolverPool {
         resolver_opts.timeout = options.timeout;
         resolver_opts.attempts = options.retries.max(1) as usize;
         resolver_opts.validate = false; // Don't validate, just resolve
-        resolver_opts.use_hosts_file = false; // Don't use hosts file
+        resolver_opts.use_hosts_file = ResolveHosts::Never; // Don't use hosts file
 
         let mut pool = Vec::with_capacity(resolver_configs.len());
         for addr in &resolver_configs {
             let config = create_resolver_config(&[addr.to_string()])?;
             debug!("Creating resolver for {}", addr);
-            let resolver = TokioAsyncResolver::tokio(config, resolver_opts.clone());
+            let resolver = build_resolver(config, resolver_opts.clone())?;
             pool.push((Arc::new(resolver), addr.to_string()));
         }
 
@@ -124,7 +126,7 @@ impl ResolverPool {
             limiter.wait().await;
         }
 
-        let domain_name = hickory_resolver::Name::parse(domain, None)
+        let domain_name = hickory_resolver::proto::rr::Name::parse(domain, None)
             .map_err(|e| DnsxError::invalid_input(format!("Invalid domain name: {}", e)))?;
 
         let total = self.resolvers.len();
@@ -165,12 +167,15 @@ impl ResolverPool {
                     });
                 }
                 Ok(Err(e)) => {
-                    if let hickory_resolver::error::ResolveErrorKind::NoRecordsFound {
-                        response_code,
-                        ..
-                    } = e.kind()
-                    {
-                        let code = ResponseCode::from_hickory(*response_code);
+                    let negative_code = match &e {
+                        NetError::Dns(DnsError::NoRecordsFound(no_records)) => {
+                            Some(no_records.response_code)
+                        }
+                        NetError::Dns(DnsError::ResponseCode(code)) => Some(*code),
+                        _ => None,
+                    };
+                    if let Some(code) = negative_code {
+                        let code = ResponseCode::from_hickory(code);
                         let outcome = QueryOutcome {
                             lookup: empty_lookup(&domain_name, record_type),
                             resolver: resolver_addr.clone(),
@@ -224,11 +229,11 @@ impl ResolverPool {
         let mut opts = ResolverOpts::default();
         opts.timeout = self.timeout;
         opts.validate = true;
-        opts.use_hosts_file = false;
+        opts.use_hosts_file = ResolveHosts::Never;
         let config = create_resolver_config(&[self.resolvers[0].1.clone()])?;
-        let resolver = TokioAsyncResolver::tokio(config, opts);
+        let resolver = build_resolver(config, opts)?;
 
-        let name = hickory_resolver::Name::parse(domain, None)
+        let name = hickory_resolver::proto::rr::Name::parse(domain, None)
             .map_err(|e| DnsxError::invalid_input(format!("Invalid domain name: {}", e)))?;
         match tokio::time::timeout(
             self.timeout * 4,
@@ -281,10 +286,10 @@ impl ResolverPool {
 
 /// Create resolver config from resolver addresses
 fn create_resolver_config(addrs: &[String]) -> Result<ResolverConfig> {
-    use hickory_resolver::config::{NameServerConfig, Protocol};
+    use hickory_resolver::config::{ConnectionConfig, NameServerConfig};
     use std::net::{SocketAddr, ToSocketAddrs};
 
-    let mut config = ResolverConfig::new();
+    let mut name_servers = Vec::with_capacity(addrs.len());
 
     for addr in addrs {
         let socket_addr: SocketAddr = addr
@@ -295,15 +300,24 @@ fn create_resolver_config(addrs: &[String]) -> Result<ResolverConfig> {
             .next()
             .ok_or_else(|| DnsxError::ResolverConfig(format!("Failed to resolve {}", addr)))?;
 
-        config.add_name_server(NameServerConfig {
-            socket_addr,
-            protocol: Protocol::Udp, // Default to UDP
-            tls_dns_name: None,
-            trust_negative_responses: false,
-            bind_addr: None,
-            tls_config: None,
-        });
+        // UDP with TCP fallback for truncated answers
+        let mut udp = ConnectionConfig::udp();
+        udp.port = socket_addr.port();
+        let mut tcp = ConnectionConfig::tcp();
+        tcp.port = socket_addr.port();
+        let server = NameServerConfig::new(socket_addr.ip(), false, vec![udp, tcp]);
+        name_servers.push(server);
     }
 
-    Ok(config)
+    Ok(ResolverConfig::from_name_servers(name_servers))
+}
+
+/// Build a tokio resolver from a config and options
+fn build_resolver(config: ResolverConfig, opts: ResolverOpts) -> Result<TokioResolver> {
+    use hickory_resolver::net::runtime::TokioRuntimeProvider;
+
+    hickory_resolver::Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+        .with_options(opts)
+        .build()
+        .map_err(|e| DnsxError::ResolverConfig(format!("Failed to build resolver: {}", e)))
 }

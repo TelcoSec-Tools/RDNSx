@@ -1,9 +1,11 @@
 //! DNSSEC enumeration and analysis
 
+use crate::hickory_ext::LookupExt;
+use hickory_resolver::proto::dnssec::PublicKey;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use hickory_resolver::proto::rr::dnssec::rdata::DNSSECRData;
+use hickory_resolver::proto::dnssec::rdata::DNSSECRData;
 use hickory_resolver::proto::rr::{RData, RecordType as HRecordType};
 
 use crate::raw::{self, RawQueryOptions};
@@ -130,7 +132,7 @@ impl DnssecAnalyzer {
                     result.dnssec_enabled = true;
                     result.dnskey_records.push(DnskeyInfo {
                         key_tag: dnskey.calculate_key_tag().unwrap_or(0),
-                        algorithm: u8::from(dnskey.algorithm()),
+                        algorithm: u8::from(dnskey.public_key().algorithm()),
                         flags: dnskey.flags(),
                         protocol: 3,
                         resolver: resolver_addr.clone(),
@@ -166,14 +168,14 @@ impl DnssecAnalyzer {
                 };
                 if let Ok(msg) = raw::raw_query(server, &apex, HRecordType::SOA, opts).await {
                     result.rrsig_records = msg
-                        .answers()
+                        .answers
                         .iter()
                         .filter(|r| r.record_type() == HRecordType::RRSIG)
                         .count();
                 }
                 if let Ok(msg) = raw::raw_query(server, &apex, HRecordType::NSEC, opts).await {
                     result.nsec_records = msg
-                        .answers()
+                        .answers
                         .iter()
                         .filter(|r| r.record_type() == HRecordType::NSEC)
                         .count();
@@ -181,7 +183,7 @@ impl DnssecAnalyzer {
                 if let Ok(msg) = raw::raw_query(server, &apex, HRecordType::NSEC3PARAM, opts).await
                 {
                     result.nsec3_records = msg
-                        .answers()
+                        .answers
                         .iter()
                         .filter(|r| r.record_type() == HRecordType::NSEC3PARAM)
                         .count();
@@ -363,7 +365,7 @@ impl DnssecAnalyzer {
         // Detect NSEC3: walking hashed names is not possible without offline cracking
         if let Ok(msg) = raw::raw_query(server, &apex, HRecordType::NSEC3PARAM, opts).await {
             if msg
-                .answers()
+                .answers
                 .iter()
                 .any(|r| r.record_type() == HRecordType::NSEC3PARAM)
             {
@@ -395,10 +397,8 @@ impl DnssecAnalyzer {
                 }
             };
 
-            let nsec = msg.answers().iter().find_map(|r| match r.data() {
-                Some(RData::DNSSEC(DNSSECRData::NSEC(nsec))) if r.name() == &current => {
-                    Some(nsec.clone())
-                }
+            let nsec = msg.answers.iter().find_map(|r| match &r.data {
+                RData::DNSSEC(DNSSECRData::NSEC(nsec)) if r.name == current => Some(nsec.clone()),
                 _ => None,
             });
 
@@ -418,7 +418,7 @@ impl DnssecAnalyzer {
             result.nsec_chain.push(NsecRecord {
                 owner,
                 next_domain: next_str,
-                types: nsec.type_bit_maps().iter().map(|t| t.to_string()).collect(),
+                types: nsec.type_bit_maps().map(|t| t.to_string()).collect(),
             });
 
             // The last NSEC record points back to the apex

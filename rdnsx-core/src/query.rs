@@ -1,10 +1,12 @@
 //! DNS query engine
 
+use crate::hickory_ext::TxtExt;
+use hickory_resolver::proto::dnssec::PublicKey;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use hickory_resolver::proto::rr::dnssec::rdata::DNSSECRData;
+use hickory_resolver::proto::dnssec::rdata::DNSSECRData;
 use hickory_resolver::proto::rr::RData;
 use tracing::trace;
 
@@ -86,13 +88,12 @@ impl QueryEngine {
         let query_time_ms = start.elapsed().as_secs_f64() * 1000.0;
 
         let mut records = Vec::new();
-        for record in outcome.lookup.records() {
+        for record in outcome.lookup.answers() {
             trace!("Processing Record: {:?}", record);
-            let Some(rdata) = record.data() else { continue };
-            let value = parse_rdata(rdata)?;
+            let value = parse_rdata(&record.data)?;
             // Label each record with its real owner name and type: a lookup for an
             // aliased name also returns the CNAME chain.
-            let owner = record.name().to_string();
+            let owner = record.name.to_string();
             let owner = owner.trim_end_matches('.').to_string();
             let rtype = RecordType::from_hickory(record.record_type()).unwrap_or(record_type);
 
@@ -100,7 +101,7 @@ impl QueryEngine {
                 owner,
                 rtype,
                 value,
-                record.ttl(),
+                record.ttl,
                 outcome.response_code,
                 outcome.resolver.clone(),
                 query_time_ms,
@@ -137,8 +138,8 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         RData::PTR(ptr) => Ok(RecordValue::Domain(ptr.to_string())),
         RData::NS(ns) => Ok(RecordValue::Domain(ns.to_string())),
         RData::MX(mx) => Ok(RecordValue::Mx {
-            priority: mx.preference(),
-            exchange: mx.exchange().to_string(),
+            priority: mx.preference,
+            exchange: mx.exchange.to_string(),
         }),
         RData::TXT(txt) => {
             // TXT records can have multiple strings, join them
@@ -150,36 +151,36 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
             Ok(RecordValue::Text(text))
         }
         RData::SRV(srv) => Ok(RecordValue::Srv {
-            priority: srv.priority(),
-            weight: srv.weight(),
-            port: srv.port(),
-            target: srv.target().to_string(),
+            priority: srv.priority,
+            weight: srv.weight,
+            port: srv.port,
+            target: srv.target.to_string(),
         }),
         RData::SOA(soa) => Ok(RecordValue::Soa {
-            mname: soa.mname().to_string(),
-            rname: soa.rname().to_string(),
-            serial: soa.serial(),
-            refresh: soa.refresh(),
-            retry: soa.retry(),
-            expire: soa.expire(),
-            minimum: soa.minimum(),
+            mname: soa.mname.to_string(),
+            rname: soa.rname.to_string(),
+            serial: soa.serial,
+            refresh: soa.refresh,
+            retry: soa.retry,
+            expire: soa.expire,
+            minimum: soa.minimum,
         }),
         RData::ANAME(dname) => Ok(RecordValue::Domain(dname.to_string())),
         RData::CAA(caa) => Ok(RecordValue::Caa {
-            flags: if caa.issuer_critical() { 128 } else { 0 },
-            tag: caa.tag().as_str().to_string(),
-            value: format!("{}", caa.value()),
+            flags: caa.flags(),
+            tag: caa.tag.as_str().to_string(),
+            value: String::from_utf8_lossy(&caa.value).to_string(),
         }),
         RData::SSHFP(sshfp) => Ok(RecordValue::Sshfp {
-            algorithm: sshfp.algorithm().into(),
-            fingerprint_type: sshfp.fingerprint_type().into(),
-            fingerprint: sshfp.fingerprint().to_vec(),
+            algorithm: sshfp.algorithm.into(),
+            fingerprint_type: sshfp.fingerprint_type.into(),
+            fingerprint: sshfp.fingerprint.to_vec(),
         }),
         RData::TLSA(tlsa) => Ok(RecordValue::Tlsa {
-            cert_usage: tlsa.cert_usage().into(),
-            selector: tlsa.selector().into(),
-            matching_type: tlsa.matching().into(),
-            cert_data: tlsa.cert_data().to_vec(),
+            cert_usage: tlsa.cert_usage.into(),
+            selector: tlsa.selector.into(),
+            matching_type: tlsa.matching.into(),
+            cert_data: tlsa.cert_data.to_vec(),
         }),
         // RData::URI(uri) => Ok(RecordValue::Uri {
         //     priority: uri.priority(),
@@ -187,16 +188,16 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         //     target: String::from_utf8_lossy(uri.target()).to_string(),
         // }),
         RData::NAPTR(naptr) => Ok(RecordValue::Naptr {
-            order: naptr.order(),
-            preference: naptr.preference(),
-            flags: String::from_utf8_lossy(naptr.flags()).to_string(),
-            services: String::from_utf8_lossy(naptr.services()).to_string(),
-            regexp: String::from_utf8_lossy(naptr.regexp()).to_string(),
-            replacement: naptr.replacement().to_string(),
+            order: naptr.order,
+            preference: naptr.preference,
+            flags: String::from_utf8_lossy(&naptr.flags).to_string(),
+            services: String::from_utf8_lossy(&naptr.services).to_string(),
+            regexp: String::from_utf8_lossy(&naptr.regexp).to_string(),
+            replacement: naptr.replacement.to_string(),
         }),
         RData::HINFO(hinfo) => Ok(RecordValue::Hinfo {
-            cpu: String::from_utf8_lossy(hinfo.cpu()).to_string(),
-            os: String::from_utf8_lossy(hinfo.os()).to_string(),
+            cpu: String::from_utf8_lossy(&hinfo.cpu).to_string(),
+            os: String::from_utf8_lossy(&hinfo.os).to_string(),
         }),
         // RData::LOC(loc) => Ok(RecordValue::Loc {
         //     version: loc.version(),
@@ -209,31 +210,31 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         // }),
         RData::Unknown { code, rdata: raw } => {
             let hex = raw
-                .anything()
+                .anything
                 .iter()
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>();
             Ok(RecordValue::Other(format!(
                 "TYPE{} \\# {} {}",
                 u16::from(*code),
-                raw.anything().len(),
+                raw.anything.len(),
                 hex
             )))
         }
         RData::HTTPS(https) => Ok(RecordValue::Https {
-            priority: https.svc_priority(),
-            target: https.target_name().to_string(),
+            priority: https.svc_priority,
+            target: https.target_name.to_string(),
             params: https
-                .svc_params()
+                .svc_params
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
                 .collect(),
         }),
         RData::SVCB(svcb) => Ok(RecordValue::Svcb {
-            priority: svcb.svc_priority(),
-            target: svcb.target_name().to_string(),
+            priority: svcb.svc_priority,
+            target: svcb.target_name.to_string(),
             params: svcb
-                .svc_params()
+                .svc_params
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
                 .collect(),
@@ -241,8 +242,8 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         RData::DNSSEC(DNSSECRData::DNSKEY(key)) => Ok(RecordValue::Dnskey {
             flags: key.flags(),
             protocol: 3,
-            algorithm: u8::from(key.algorithm()),
-            public_key: key.public_key().to_vec(),
+            algorithm: u8::from(key.public_key().algorithm()),
+            public_key: key.public_key().public_bytes().to_vec(),
         }),
         RData::DNSSEC(DNSSECRData::DS(ds)) => Ok(RecordValue::Ds {
             key_tag: ds.key_tag(),

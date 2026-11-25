@@ -6,6 +6,7 @@
 //! This module sends single queries over UDP, retrying over TCP when the answer
 //! is truncated.
 
+use crate::hickory_ext::{LookupExt, TxtExt};
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::time::Duration;
@@ -60,11 +61,8 @@ pub fn fqdn(name: &str) -> Result<Name> {
 }
 
 fn build_query(name: &Name, rtype: HRecordType, opts: &RawQueryOptions) -> Message {
-    let mut message = Message::new();
-    message.set_id(rand::random());
-    message.set_message_type(MessageType::Query);
-    message.set_op_code(OpCode::Query);
-    message.set_recursion_desired(opts.recursion_desired);
+    let mut message = Message::new(rand::random(), MessageType::Query, OpCode::Query);
+    message.metadata.recursion_desired = opts.recursion_desired;
 
     let mut query = Query::query(name.clone(), rtype);
     query.set_query_class(opts.class);
@@ -91,9 +89,9 @@ pub async fn raw_query(
         .to_vec()
         .map_err(|e| DnsxError::Other(format!("Failed to encode query: {}", e)))?;
 
-    let response = udp_exchange(server, &bytes, request.id(), opts.timeout).await?;
-    if response.truncated() {
-        return tcp_exchange(server, &bytes, request.id(), opts.timeout).await;
+    let response = udp_exchange(server, &bytes, request.id, opts.timeout).await?;
+    if response.truncation {
+        return tcp_exchange(server, &bytes, request.id, opts.timeout).await;
     }
     Ok(response)
 }
@@ -137,7 +135,7 @@ async fn udp_exchange(
         };
         match Message::from_vec(&buf[..len]) {
             // Ignore stray datagrams with another ID
-            Ok(message) if message.id() == id => return Ok(message),
+            Ok(message) if message.id == id => return Ok(message),
             Ok(_) => continue,
             Err(e) => {
                 return Err(DnsxError::Other(format!(
@@ -203,7 +201,7 @@ async fn tcp_exchange(
     };
     let message = Message::from_vec(&buf)
         .map_err(|e| DnsxError::Other(format!("Bad TCP response from {}: {}", server, e)))?;
-    if message.id() != id {
+    if message.id != id {
         return Err(DnsxError::Other(format!(
             "Mismatched response ID from {}",
             server
@@ -273,10 +271,10 @@ pub async fn authoritative_nameservers(pool: &ResolverPool, domain: &str) -> Res
 /// Read the strings of the first TXT record in a message's answer section
 pub fn first_txt(message: &Message) -> Option<String> {
     message
-        .answers()
+        .answers
         .iter()
-        .find_map(|record| match record.data() {
-            Some(RData::TXT(txt)) => Some(
+        .find_map(|record| match &record.data {
+            RData::TXT(txt) => Some(
                 txt.iter()
                     .map(|bytes| String::from_utf8_lossy(bytes).to_string())
                     .collect::<Vec<_>>()
@@ -298,10 +296,10 @@ mod tests {
             ..Default::default()
         };
         let message = build_query(&name, HRecordType::SOA, &opts);
-        let edns = message.extensions().as_ref().expect("EDNS present");
-        assert!(edns.dnssec_ok());
-        assert!(!message.recursion_desired());
-        assert_eq!(message.queries()[0].name().to_string(), "example.com.");
+        let edns = message.edns.as_ref().expect("EDNS present");
+        assert!(edns.flags().dnssec_ok);
+        assert!(!message.recursion_desired);
+        assert_eq!(message.queries[0].name().to_string(), "example.com.");
     }
 
     #[test]

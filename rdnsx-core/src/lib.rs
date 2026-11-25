@@ -19,6 +19,7 @@ pub mod enumeration;
 pub mod enumeration_types;
 pub mod error;
 pub mod export;
+pub mod hickory_ext;
 pub mod input;
 pub mod output;
 pub mod query;

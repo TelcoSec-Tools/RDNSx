@@ -1,5 +1,6 @@
 //! Advanced DNS enumeration capabilities
 
+use crate::hickory_ext::LookupExt;
 use std::sync::Arc;
 
 use tracing::info;
@@ -243,7 +244,7 @@ impl DnsEnumerator {
         .await
         .map_err(|e| DnsxError::Other(format!("Server fingerprinting failed: {}", e)))?;
         fingerprint.response_time_ms = start.elapsed().as_millis() as u64;
-        fingerprint.edns_support = edns_probe.extensions().is_some();
+        fingerprint.edns_support = edns_probe.edns.is_some();
 
         // 2. CHAOS identity banners
         let chaos = RawQueryOptions {
@@ -270,9 +271,9 @@ impl DnsEnumerator {
         };
         if let Ok(name) = raw::fqdn("example.com") {
             if let Ok(msg) = raw::raw_query(addr, &name, HRecordType::A, recursive).await {
-                fingerprint.recursion_available = msg.recursion_available()
-                    && msg.response_code() == hickory_resolver::proto::op::ResponseCode::NoError
-                    && !msg.answers().is_empty();
+                fingerprint.recursion_available = msg.recursion_available
+                    && msg.response_code == hickory_resolver::proto::op::ResponseCode::NoError
+                    && !msg.answers.is_empty();
             }
         }
 
@@ -284,7 +285,7 @@ impl DnsEnumerator {
         };
         if let Ok(msg) = raw::raw_query(addr, &probe_zone, HRecordType::SOA, dnssec).await {
             fingerprint.dnssec_support = msg
-                .answers()
+                .answers
                 .iter()
                 .any(|r| r.record_type() == HRecordType::RRSIG);
         }
