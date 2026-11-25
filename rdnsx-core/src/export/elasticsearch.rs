@@ -5,9 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use elasticsearch::{
-    Elasticsearch, http::transport::Transport,
-    indices::IndicesCreateParts,
-    BulkParts,
+    http::transport::Transport, indices::IndicesCreateParts, BulkParts, Elasticsearch,
 };
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -51,7 +49,10 @@ impl ElasticsearchExporter {
         }
 
         let doc_count = buffer.len();
-        debug!("Flushing {} documents to Elasticsearch index {}", doc_count, self._index);
+        debug!(
+            "Flushing {} documents to Elasticsearch index {}",
+            doc_count, self._index
+        );
 
         let mut bulk_body = String::new();
         for doc in buffer.drain(..) {
@@ -61,7 +62,8 @@ impl ElasticsearchExporter {
             bulk_body.push('\n');
         }
 
-        let response = self._client
+        let response = self
+            ._client
             .bulk(BulkParts::Index(&self._index))
             .body(vec![bulk_body])
             .send()
@@ -70,71 +72,91 @@ impl ElasticsearchExporter {
 
         let status = response.status_code();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unavailable".to_string());
-            warn!("Elasticsearch bulk export failed with status {}: {}", status, error_text);
-            return Err(DnsxError::Other(format!("Elasticsearch bulk export failed: {}", status)));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unavailable".to_string());
+            warn!(
+                "Elasticsearch bulk export failed with status {}: {}",
+                status, error_text
+            );
+            return Err(DnsxError::Other(format!(
+                "Elasticsearch bulk export failed: {}",
+                status
+            )));
         }
 
-        debug!("Successfully flushed {} documents to Elasticsearch", doc_count);
+        debug!(
+            "Successfully flushed {} documents to Elasticsearch",
+            doc_count
+        );
         Ok(())
     }
 }
 
 /// Ensure index exists with proper mapping
 async fn ensure_index(client: &Elasticsearch, index: &str) -> Result<()> {
-        // Try to create index (will fail silently if it already exists)
-        // Create index with mapping
-        let mapping = json!({
-            "mappings": {
-                "properties": {
-                    "@timestamp": {
-                        "type": "date"
-                    },
-                    "domain": {
-                        "type": "keyword"
-                    },
-                    "record_type": {
-                        "type": "keyword"
-                    },
-                    "value": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {
-                                "type": "keyword"
-                            }
+    // Try to create index (will fail silently if it already exists)
+    // Create index with mapping
+    let mapping = json!({
+        "mappings": {
+            "properties": {
+                "@timestamp": {
+                    "type": "date"
+                },
+                "domain": {
+                    "type": "keyword"
+                },
+                "record_type": {
+                    "type": "keyword"
+                },
+                "value": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": {
+                            "type": "keyword"
                         }
-                    },
-                    "resolver": {
-                        "type": "keyword"
-                    },
-                    "ttl": {
-                        "type": "integer"
-                    },
-                    "response_code": {
-                        "type": "keyword"
-                    },
-                    "query_time_ms": {
-                        "type": "float"
                     }
+                },
+                "resolver": {
+                    "type": "keyword"
+                },
+                "ttl": {
+                    "type": "integer"
+                },
+                "response_code": {
+                    "type": "keyword"
+                },
+                "query_time_ms": {
+                    "type": "float"
                 }
             }
-        });
-
-        let result = client
-            .indices()
-            .create(IndicesCreateParts::Index(index))
-            .body(mapping)
-            .send()
-            .await;
-
-        // Ignore error if index already exists
-        match result {
-            Ok(_) => debug!("Created Elasticsearch index: {}", index),
-            Err(e) => {
-                // Index might already exist, that's okay
-                debug!("Index creation result (may already exist): {:?}", e);
-            }
         }
+    });
+
+    let result = client
+        .indices()
+        .create(IndicesCreateParts::Index(index))
+        .body(mapping)
+        .send()
+        .await;
+
+    let response =
+        result.map_err(|e| DnsxError::Other(format!("Failed to reach Elasticsearch: {}", e)))?;
+    let status = response.status_code();
+    if status.is_success() {
+        debug!("Created Elasticsearch index: {}", index);
+    } else {
+        let body = response.text().await.unwrap_or_default();
+        if body.contains("resource_already_exists_exception") {
+            debug!("Elasticsearch index {} already exists", index);
+        } else {
+            return Err(DnsxError::Other(format!(
+                "Failed to create Elasticsearch index {}: {} {}",
+                index, status, body
+            )));
+        }
+    }
 
     Ok(())
 }

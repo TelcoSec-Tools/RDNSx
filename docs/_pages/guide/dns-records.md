@@ -5,7 +5,7 @@ description: "Comprehensive guide to all 27 DNS record types supported by RDNSx,
 keywords: "DNS record types, DNS records reference, A record, AAAA record, MX record, CNAME, TXT record, DNSSEC, RDNSx"
 og_image: /assets/images/logo.svg
 twitter_card: summary_large_image
-author: "Quinas Project"
+author: "TelcoSec"
 lang: en-US
 permalink: /guide/dns-records/
 priority: 0.7

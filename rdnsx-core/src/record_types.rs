@@ -99,6 +99,11 @@ impl RecordType {
         ]
     }
 
+    /// Convert from a hickory-dns RecordType, if it is one we model
+    pub fn from_hickory(rtype: hickory_resolver::proto::rr::RecordType) -> Option<RecordType> {
+        Self::all().into_iter().find(|t| t.to_hickory() == rtype)
+    }
+
     /// Convert to hickory-dns RecordType
     pub fn to_hickory(&self) -> hickory_resolver::proto::rr::RecordType {
         use hickory_resolver::proto::rr::RecordType as HRecordType;
@@ -115,13 +120,13 @@ impl RecordType {
             // RecordType::Afsdb => HRecordType::AFSDB,
             RecordType::Caa => HRecordType::CAA,
             // RecordType::Cert => HRecordType::CERT,
-            RecordType::Dname => HRecordType::ANAME,
+            RecordType::Dname => HRecordType::Unknown(39),
             RecordType::Dnskey => HRecordType::DNSKEY,
             RecordType::Ds => HRecordType::DS,
             RecordType::Hinfo => HRecordType::HINFO,
             RecordType::Https => HRecordType::HTTPS,
             RecordType::Key => HRecordType::KEY,
-            // RecordType::Loc => HRecordType::LOC,
+            RecordType::Loc => HRecordType::Unknown(29),
             RecordType::Naptr => HRecordType::NAPTR,
             RecordType::Nsec => HRecordType::NSEC,
             RecordType::Nsec3 => HRecordType::NSEC3,
@@ -130,9 +135,9 @@ impl RecordType {
             RecordType::Sshfp => HRecordType::SSHFP,
             RecordType::Svcb => HRecordType::SVCB,
             RecordType::Tlsa => HRecordType::TLSA,
-            // RecordType::Uri => HRecordType::URI,
-            // Unsupported record types - return A as fallback
-            RecordType::Afsdb | RecordType::Cert | RecordType::Loc | RecordType::Uri => HRecordType::A,
+            RecordType::Afsdb => HRecordType::Unknown(18),
+            RecordType::Cert => HRecordType::Unknown(37),
+            RecordType::Uri => HRecordType::Unknown(256),
         }
     }
 }

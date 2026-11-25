@@ -1,7 +1,7 @@
 # Site settings
 title: "RDNSx Documentation - Fast DNS Toolkit in Rust"
 description: "Complete documentation for RDNSx, a high-performance DNS toolkit written in Rust. Features ASN enumeration, reverse DNS lookups, subdomain enumeration, and comprehensive DNS analysis tools."
-url: "https://rdnsx.quinas.cloud"
+url: "https://rdnsx.telcosec.net"
 baseurl: ""
 
 # SEO and Meta
@@ -45,24 +45,24 @@ include:
   - _pages
 
 # Custom variables
-repository: "Quinas-Project/RDNSx"
+repository: "TelcoSec-Tools/RDNSx"
 logo: /assets/images/logo.svg
-github_username: Quinas-Project
+github_username: TelcoSec-Tools
 
 # SEO and Social Media
-author: "Quinas Project"
+author: "TelcoSec"
 keywords: "DNS toolkit, Rust DNS scanner, network enumeration, ASN lookup, reverse DNS, subdomain enumeration, DNSSEC analysis, security research tools, network reconnaissance, command line DNS, DNS record types, IPv6 enumeration, email security analysis, CDN detection, zone transfer, passive DNS, server fingerprinting, DNS bruteforce, Rust CLI tools, network security, penetration testing, red team tools, cybersecurity, network analysis, domain intelligence"
 social:
-  name: "Quinas Project"
+  name: "TelcoSec"
   links:
-    - https://github.com/Quinas-Project/RDNSx
-  twitter: "@QuinasProject"
-  linkedin: "https://linkedin.com/company/quinas-project"
+    - https://github.com/TelcoSec-Tools/RDNSx
+  twitter: "@TelcoSec"
+  linkedin: "https://linkedin.com/company/telcosec"
 
 # Open Graph and Twitter Cards
 og_image: /assets/images/logo.svg
 twitter:
-  username: "@QuinasProject"
+  username: "@TelcoSec"
   card: summary_large_image
 
 # Structured Data - Software Application
@@ -74,8 +74,8 @@ software:
   programming_language: "Rust"
   version: "1.0.0"
   author:
-    name: "Quinas Project"
-    url: "https://github.com/Quinas-Project"
+    name: "TelcoSec"
+    url: "https://github.com/TelcoSec-Tools"
   offers:
     price: "0"
     price_currency: "USD"
@@ -87,7 +87,7 @@ software:
 seo:
   type: website
   site_name: "RDNSx Documentation"
-  twitter_creator: "@QuinasProject"
+  twitter_creator: "@TelcoSec"
   facebook_app_id: ""
   google_site_verification: ""
   bing_site_verification: ""
@@ -134,7 +134,7 @@ sitemap:
 seo:
   type: website
   site_name: "RDNSx Documentation"
-  twitter_creator: "@QuinasProject"
+  twitter_creator: "@TelcoSec"
   facebook_app_id: ""
   google_site_verification: ""
   bing_site_verification: ""
@@ -153,11 +153,11 @@ seo_tags:
 
 # Social Media
 social:
-  name: "Quinas Project"
+  name: "TelcoSec"
   links:
-    - https://github.com/Quinas-Project/RDNSx
-  twitter: "@QuinasProject"
-  linkedin: "https://linkedin.com/company/quinas-project"
+    - https://github.com/TelcoSec-Tools/RDNSx
+  twitter: "@TelcoSec"
+  linkedin: "https://linkedin.com/company/telcosec"
   youtube: ""
   instagram: ""
   facebook: ""
@@ -212,12 +212,12 @@ seo_advanced:
 
   # Local Business/Organization
   organization:
-    name: "Quinas Project"
-    url: "https://github.com/Quinas-Project"
+    name: "TelcoSec"
+    url: "https://github.com/TelcoSec-Tools"
     logo: "{{ site.url }}/assets/images/logo.svg"
     same_as:
-      - "https://github.com/Quinas-Project"
-      - "https://twitter.com/QuinasProject"
+      - "https://github.com/TelcoSec-Tools"
+      - "https://twitter.com/TelcoSec"
 
   # Breadcrumbs
   breadcrumbs: true
@@ -350,15 +350,15 @@ seo_advanced:
   social_media:
     twitter:
       card: "summary_large_image"
-      site: "@QuinasProject"
-      creator: "@QuinasProject"
+      site: "@TelcoSec"
+      creator: "@TelcoSec"
     facebook:
       app_id: ""
       admins: ""
     linkedin:
-      company: "quinas-project"
+      company: "telcosec"
     github:
-      username: "Quinas-Project"
+      username: "TelcoSec-Tools"
       repository: "RDNSx"
 
   # Analytics & Tracking

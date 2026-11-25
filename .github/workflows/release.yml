@@ -109,10 +109,10 @@ jobs:
             ext: ".exe"
             runner: windows-2022
           - os: macos-latest
-            target: x86_64-apple-darwin
-            name: macos-x86_64
+            target: aarch64-apple-darwin
+            name: macos-aarch64
             ext: ""
-            runner: macos-12
+            runner: macos-latest
     steps:
     - uses: actions/checkout@v4
 
@@ -187,8 +187,8 @@ jobs:
           artifacts/build-linux-x86_64/rdnsx-linux-x86_64.tar.gz.sha256
           artifacts/build-windows-x86_64/rdnsx-windows-x86_64.zip
           artifacts/build-windows-x86_64/rdnsx-windows-x86_64.zip.sha256
-          artifacts/build-macos-x86_64/rdnsx-macos-x86_64.tar.gz
-          artifacts/build-macos-x86_64/rdnsx-macos-x86_64.tar.gz.sha256
+          artifacts/build-macos-aarch64/rdnsx-macos-aarch64.tar.gz
+          artifacts/build-macos-aarch64/rdnsx-macos-aarch64.tar.gz.sha256
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

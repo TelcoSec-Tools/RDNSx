@@ -9,29 +9,44 @@ use hickory_resolver::TokioAsyncResolver;
 use tokio::sync::Semaphore;
 use tracing::{debug, trace, warn};
 
+use crate::concurrency::RateLimiter;
 use crate::config::DnsxOptions;
 use crate::error::{DnsxError, Result};
-use crate::types::RecordType;
+use crate::types::{RecordType, ResponseCode};
 use crate::utils;
 
 /// DNS resolver pool with connection reuse
 pub struct ResolverPool {
-    /// Primary resolver
-    resolver: Arc<TokioAsyncResolver>,
-    /// Primary resolver address
-    primary_resolver_addr: String,
-    /// Backup resolvers
-    backup_resolvers: Vec<Arc<TokioAsyncResolver>>,
-    /// Backup resolver addresses
-    _backup_resolver_addrs: Vec<String>,
+    /// Resolvers with their addresses; the first one is the primary
+    resolvers: Vec<(Arc<TokioAsyncResolver>, String)>,
     /// Concurrency semaphore
     semaphore: Arc<Semaphore>,
     /// Query timeout
     timeout: Duration,
-    /// Number of retries
-    _retries: u32,
     /// Round-robin index for load balancing
     rr_index: std::sync::atomic::AtomicUsize,
+    /// Optional global rate limiter (queries per second)
+    rate_limiter: Option<RateLimiter>,
+}
+
+/// Result of a single DNS query, including the response code
+pub struct QueryOutcome {
+    /// Records returned (empty for negative answers)
+    pub lookup: hickory_resolver::lookup::Lookup,
+    /// Address of the resolver that produced this answer
+    pub resolver: String,
+    /// DNS response code
+    pub response_code: ResponseCode,
+}
+
+fn empty_lookup(
+    name: &hickory_resolver::proto::rr::Name,
+    record_type: RecordType,
+) -> hickory_resolver::lookup::Lookup {
+    hickory_resolver::lookup::Lookup::new_with_max_ttl(
+        hickory_resolver::proto::op::Query::query(name.clone(), record_type.to_hickory()),
+        Arc::new([]),
+    )
 }
 
 impl ResolverPool {
@@ -50,159 +65,189 @@ impl ResolverPool {
             resolver_configs.push(addr);
         }
 
-        // Store primary resolver address
-        let primary_resolver_addr = resolver_configs[0].clone();
-
-        // Create primary resolver
-        let primary_config = create_resolver_config(&resolver_configs[0..1].iter().map(|addr| addr.to_string()).collect::<Vec<_>>())?;
         let mut resolver_opts = ResolverOpts::default();
         resolver_opts.timeout = options.timeout;
-        resolver_opts.attempts = options.retries as usize;
+        resolver_opts.attempts = options.retries.max(1) as usize;
         resolver_opts.validate = false; // Don't validate, just resolve
         resolver_opts.use_hosts_file = false; // Don't use hosts file
-        resolver_opts.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6; // Prefer IPv4
 
-        // Try system resolver first
-        debug!("Attempting to use system resolver configuration");
-        let system_resolver = TokioAsyncResolver::tokio_from_system_conf();
-
-        let resolver = match system_resolver {
-            Ok(resolver) => {
-                debug!("Successfully created system resolver");
-                resolver
-            }
-            Err(e) => {
-                debug!("System resolver failed ({}), using manual configuration", e);
-                debug!("Creating resolver with config: {:?}", primary_config);
-                debug!("Resolver options: timeout={:?}, attempts={}, validate={}", resolver_opts.timeout, resolver_opts.attempts, resolver_opts.validate);
-
-                TokioAsyncResolver::tokio(primary_config, resolver_opts.clone())
-            }
-        };
-
-        // Create backup resolvers if any
-        let mut backup_resolvers = Vec::new();
-        let mut backup_resolver_addrs = Vec::new();
-        if resolver_configs.len() > 1 {
-            for config in &resolver_configs[1..] {
-                let backup_config = create_resolver_config(&[config.to_string()])?;
-                let backup_resolver = TokioAsyncResolver::tokio(
-                    backup_config,
-                    resolver_opts.clone(),
-                );
-                backup_resolvers.push(backup_resolver);
-                backup_resolver_addrs.push(config.to_string());
-            }
+        let mut pool = Vec::with_capacity(resolver_configs.len());
+        for addr in &resolver_configs {
+            let config = create_resolver_config(&[addr.to_string()])?;
+            debug!("Creating resolver for {}", addr);
+            let resolver = TokioAsyncResolver::tokio(config, resolver_opts.clone());
+            pool.push((Arc::new(resolver), addr.to_string()));
         }
 
+        let rate_limiter = if options.rate_limit > 0 {
+            Some(RateLimiter::new(options.rate_limit))
+        } else {
+            None
+        };
+
         Ok(Self {
-            resolver: Arc::new(resolver),
-            primary_resolver_addr: primary_resolver_addr.to_string(),
-            backup_resolvers: backup_resolvers.into_iter().map(Arc::new).collect(),
-            _backup_resolver_addrs: backup_resolver_addrs,
-            semaphore: Arc::new(Semaphore::new(options.concurrency)),
+            resolvers: pool,
+            semaphore: Arc::new(Semaphore::new(options.concurrency.max(1))),
             timeout: options.timeout,
-            _retries: options.retries,
             rr_index: std::sync::atomic::AtomicUsize::new(0),
+            rate_limiter,
         })
     }
 
-    /// Query DNS with a specific record type
+    /// Query DNS with a specific record type.
+    ///
+    /// Negative answers (NXDOMAIN, NODATA, SERVFAIL, REFUSED...) are returned as an
+    /// empty lookup. Use [`ResolverPool::query_full`] to also get the response code.
     pub async fn query(
         &self,
         domain: &str,
         record_type: RecordType,
     ) -> Result<(hickory_resolver::lookup::Lookup, String)> {
-        let _permit = self.semaphore.acquire().await.map_err(|e| {
-            DnsxError::Other(format!("Failed to acquire semaphore: {}", e))
-        })?;
+        let outcome = self.query_full(domain, record_type).await?;
+        Ok((outcome.lookup, outcome.resolver))
+    }
+
+    /// Query DNS and return the lookup together with the response code and resolver used.
+    ///
+    /// Resolvers are chosen round-robin. A definitive answer (NOERROR or NXDOMAIN) is
+    /// returned immediately; SERVFAIL/REFUSED/timeouts fail over to the next resolver.
+    /// If every resolver answered with an error code, the last code is returned with an
+    /// empty lookup. Only when no resolver answered at all is an error returned.
+    pub async fn query_full(&self, domain: &str, record_type: RecordType) -> Result<QueryOutcome> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| DnsxError::Other(format!("Failed to acquire semaphore: {}", e)))?;
+
+        if let Some(limiter) = &self.rate_limiter {
+            limiter.wait().await;
+        }
 
         let domain_name = hickory_resolver::Name::parse(domain, None)
             .map_err(|e| DnsxError::invalid_input(format!("Invalid domain name: {}", e)))?;
 
-        // Use round-robin load balancing across all resolvers
-        let resolver_index = self.rr_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % (self.backup_resolvers.len() + 1);
+        let total = self.resolvers.len();
+        let start = self
+            .rr_index
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            % total;
 
-        let (resolver, resolver_addr) = if resolver_index == 0 {
-            // Primary resolver
-            (&self.resolver, self.primary_resolver_addr.clone())
-        } else {
-            // Backup resolver
-            let backup_index = resolver_index - 1;
-            (&self.backup_resolvers[backup_index], "backup-resolver".to_string())
-        };
+        let mut last_negative: Option<QueryOutcome> = None;
+        let mut last_error: Option<String> = None;
 
-        debug!("Querying {} ({}) using resolver at {}", domain, record_type, resolver_addr);
-        let result = tokio::time::timeout(self.timeout, resolver.lookup(domain_name.clone(), record_type.to_hickory()))
+        for offset in 0..total {
+            let index = (start + offset) % total;
+            let (resolver, resolver_addr) = &self.resolvers[index];
+
+            debug!(
+                "Querying {} ({}) using resolver at {}",
+                domain, record_type, resolver_addr
+            );
+            let result = tokio::time::timeout(
+                self.timeout,
+                resolver.lookup(domain_name.clone(), record_type.to_hickory()),
+            )
             .await;
 
-        match result {
-            Ok(Ok(lookup)) => {
-                debug!("Query successful for {} ({}), lookup contains {} records", domain, record_type, lookup.iter().count());
-                for rdata in lookup.iter() {
-                    debug!("Found record: {:?}", rdata);
+            match result {
+                Ok(Ok(lookup)) => {
+                    trace!(
+                        "Query successful for {} ({}): {} records",
+                        domain,
+                        record_type,
+                        lookup.iter().count()
+                    );
+                    return Ok(QueryOutcome {
+                        lookup,
+                        resolver: resolver_addr.clone(),
+                        response_code: ResponseCode::NoError,
+                    });
                 }
-                Ok((lookup, resolver_addr.to_string()))
-            }
-            Ok(Err(e)) => {
-                debug!("Resolver {} failed for {}: {}", resolver_addr, domain, e);
-                // Try other resolvers with failover
-                self.try_failover_resolvers(&domain_name, record_type, resolver_index).await
-            }
-            Err(_) => {
-                warn!("Query timeout for {} ({}) on resolver {}", domain, record_type, resolver_addr);
-                // Try other resolvers with failover
-                self.try_failover_resolvers(&domain_name, record_type, resolver_index).await
+                Ok(Err(e)) => {
+                    if let hickory_resolver::error::ResolveErrorKind::NoRecordsFound {
+                        response_code,
+                        ..
+                    } = e.kind()
+                    {
+                        let code = ResponseCode::from_hickory(*response_code);
+                        let outcome = QueryOutcome {
+                            lookup: empty_lookup(&domain_name, record_type),
+                            resolver: resolver_addr.clone(),
+                            response_code: code,
+                        };
+                        // NOERROR (NODATA) and NXDOMAIN are authoritative answers: stop here.
+                        if matches!(code, ResponseCode::NoError | ResponseCode::NxDomain) {
+                            return Ok(outcome);
+                        }
+                        debug!(
+                            "Resolver {} returned {} for {}, trying next",
+                            resolver_addr, code, domain
+                        );
+                        last_negative = Some(outcome);
+                    } else {
+                        debug!("Resolver {} failed for {}: {}", resolver_addr, domain, e);
+                        last_error = Some(format!("{}: {}", resolver_addr, e));
+                    }
+                }
+                Err(_) => {
+                    warn!(
+                        "Query timeout for {} ({}) on resolver {}",
+                        domain, record_type, resolver_addr
+                    );
+                    last_error = Some(format!("{}: timeout", resolver_addr));
+                }
             }
         }
+
+        if let Some(outcome) = last_negative {
+            return Ok(outcome);
+        }
+
+        Err(DnsxError::resolve(format!(
+            "All resolvers failed for {} ({}): {}",
+            domain,
+            record_type,
+            last_error.unwrap_or_else(|| "no resolvers".to_string())
+        )))
     }
 
     /// Get primary resolver address
     pub fn primary_resolver(&self) -> &str {
-        &self.primary_resolver_addr
+        &self.resolvers[0].1
     }
 
-    /// Try failover resolvers if the selected resolver fails
-    async fn try_failover_resolvers(
-        &self,
-        domain_name: &hickory_resolver::proto::rr::Name,
-        record_type: RecordType,
-        failed_index: usize,
-    ) -> Result<(hickory_resolver::lookup::Lookup, String)> {
-        let total_resolvers = self.backup_resolvers.len() + 1;
+    /// Look up `domain` with DNSSEC validation enabled (hickory's validator, anchored
+    /// at the IANA root key). Succeeds only if the answer, or the proof of
+    /// non-existence, validates.
+    pub async fn validated_lookup(&self, domain: &str, record_type: RecordType) -> Result<()> {
+        let mut opts = ResolverOpts::default();
+        opts.timeout = self.timeout;
+        opts.validate = true;
+        opts.use_hosts_file = false;
+        let config = create_resolver_config(&[self.resolvers[0].1.clone()])?;
+        let resolver = TokioAsyncResolver::tokio(config, opts);
 
-        // Try all other resolvers except the failed one
-        for i in 0..total_resolvers {
-            if i == failed_index {
-                continue; // Skip the failed resolver
-            }
-
-            let (resolver, resolver_addr) = if i == 0 {
-                // Primary resolver
-                (&self.resolver, self.primary_resolver_addr.clone())
-            } else {
-                // Backup resolver
-                (&self.backup_resolvers[i - 1], "backup-resolver".to_string())
-            };
-
-            let result = tokio::time::timeout(self.timeout, resolver.lookup(domain_name.clone(), record_type.to_hickory()))
-                .await;
-
-            match result {
-                Ok(Ok(response)) => {
-                    trace!("Failover resolver {} succeeded", resolver_addr);
-                    return Ok((response, resolver_addr.to_string()));
-                }
-                Ok(Err(e)) => {
-                    debug!("Failover resolver {} failed: {}", resolver_addr, e);
-                }
-                Err(_) => {
-                    debug!("Failover resolver {} timeout", resolver_addr);
-                }
-            }
+        let name = hickory_resolver::Name::parse(domain, None)
+            .map_err(|e| DnsxError::invalid_input(format!("Invalid domain name: {}", e)))?;
+        match tokio::time::timeout(
+            self.timeout * 4,
+            resolver.lookup(name, record_type.to_hickory()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(DnsxError::resolve(e.to_string())),
+            Err(_) => Err(DnsxError::resolve("validation timed out")),
         }
+    }
 
-        Err(DnsxError::resolve("All resolvers failed"))
+    /// Addresses of all configured resolvers, primary first
+    pub fn resolver_addresses(&self) -> Vec<String> {
+        self.resolvers
+            .iter()
+            .map(|(_, addr)| addr.clone())
+            .collect()
     }
 
     /// Lookup A records (IPv4)
@@ -244,7 +289,9 @@ fn create_resolver_config(addrs: &[String]) -> Result<ResolverConfig> {
     for addr in addrs {
         let socket_addr: SocketAddr = addr
             .to_socket_addrs()
-            .map_err(|e| DnsxError::ResolverConfig(format!("Invalid resolver address {}: {}", addr, e)))?
+            .map_err(|e| {
+                DnsxError::ResolverConfig(format!("Invalid resolver address {}: {}", addr, e))
+            })?
             .next()
             .ok_or_else(|| DnsxError::ResolverConfig(format!("Failed to resolve {}", addr)))?;
 
