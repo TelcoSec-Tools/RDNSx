@@ -1,0 +1,137 @@
+<!-- Image Optimization and Lazy Loading -->
+<script>
+  // Intersection Observer for lazy loading
+  if ('IntersectionObserver' in window) {
+    const imageObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const img = entry.target;
+          img.src = img.dataset.src;
+          img.classList.remove('lazy');
+          imageObserver.unobserve(img);
+        }
+      });
+    });
+
+    // Lazy load images
+    document.addEventListener('DOMContentLoaded', function() {
+      const lazyImages = document.querySelectorAll('img[data-src]');
+      lazyImages.forEach(img => {
+        imageObserver.observe(img);
+      });
+    });
+  } else {
+    // Fallback for browsers without IntersectionObserver
+    document.addEventListener('DOMContentLoaded', function() {
+      const lazyImages = document.querySelectorAll('img[data-src]');
+      lazyImages.forEach(img => {
+        img.src = img.dataset.src;
+      });
+    });
+  }
+
+  // Image error handling
+  document.addEventListener('DOMContentLoaded', function() {
+    const images = document.querySelectorAll('img');
+    images.forEach(img => {
+      img.addEventListener('error', function() {
+        // Replace broken images with placeholder
+        if (!this.src.includes('placeholder')) {
+          this.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZGRkIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkltYWdlIE5vdCBGb3VuZDwvdGV4dD48L3N2Zz4=';
+          this.alt = 'Image not available';
+        }
+      });
+
+      // Add loading attribute for better performance
+      if (!img.hasAttribute('loading')) {
+        img.setAttribute('loading', 'lazy');
+      }
+
+      // Add decoding attribute
+      if (!img.hasAttribute('decoding')) {
+        img.setAttribute('decoding', 'async');
+      }
+    });
+  });
+
+  // WebP support detection and fallback
+  function supportsWebP() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    return canvas.toDataURL('image/webp').indexOf('webp') > -1;
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (supportsWebP()) {
+      document.documentElement.classList.add('webp-supported');
+    } else {
+      document.documentElement.classList.add('webp-unsupported');
+    }
+  });
+</script>
+
+<style>
+/* Image optimization styles */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.lazy {
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.lazy.loaded {
+  opacity: 1;
+}
+
+/* Responsive images */
+@media (max-width: 768px) {
+  img {
+    width: 100%;
+    height: auto;
+  }
+}
+
+/* WebP support detection */
+.webp-supported .webp-fallback {
+  display: none;
+}
+
+.webp-unsupported .webp-image {
+  display: none;
+}
+
+.webp-unsupported .webp-fallback {
+  display: block;
+}
+
+/* Image loading states */
+img[loading="lazy"] {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Focus and accessibility */
+img:focus {
+  outline: 2px solid #0366d6;
+  outline-offset: 2px;
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .logo {
+    background-image: url('/assets/images/logo@2x.png');
+    background-size: contain;
+  }
+}
+</style>

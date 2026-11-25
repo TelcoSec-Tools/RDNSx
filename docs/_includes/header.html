@@ -1,20 +1,308 @@
 <header class="site-header" role="banner">
   <div class="container-lg px-3">
+    <!-- Skip to main content link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
     <div class="d-flex flex-justify-between flex-items-center">
       <div class="d-flex flex-items-center">
-        <a class="site-title" href="{{ '/' | relative_url }}" title="RDNSx Documentation - Fast DNS Toolkit in Rust">
-          <img src="{{ '/assets/images/logo.svg' | relative_url }}" alt="RDNSx Logo - High-performance DNS toolkit written in Rust for security research and network analysis" height="32" width="32" class="mr-2" loading="lazy">
+        <a class="site-title" href="{{ '/' | relative_url }}" title="RDNSx Documentation - Fast DNS Toolkit in Rust" aria-label="RDNSx Documentation Homepage">
+          <img src="{{ '/assets/images/logo.svg' | absolute_url }}"
+               alt="RDNSx Logo - High-performance DNS toolkit written in Rust for security research and network analysis"
+               height="32"
+               width="32"
+               class="mr-2 logo"
+               loading="eager"
+               decoding="async">
           <span class="site-name">RDNSx</span>
         </a>
       </div>
 
-      <nav class="site-nav" role="navigation">
+      <!-- Mobile menu toggle -->
+      <button class="mobile-menu-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+      </button>
+
+      <nav class="site-nav" role="navigation" aria-label="Main navigation">
         <ul class="site-nav-list">
+          <li>
+            <a href="{{ '/guide/' | relative_url }}"
+               {% if page.url contains '/guide/' %}class="active" aria-current="page"{% endif %}>
+              Guides
+            </a>
+          </li>
+          <li>
+            <a href="{{ '/api/' | relative_url }}"
+               {% if page.url contains '/api/' %}class="active" aria-current="page"{% endif %}>
+              API
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/{{ site.github_username }}/{{ site.repository }}"
+               target="_blank"
+               rel="noopener noreferrer"
+               aria-label="View RDNSx on GitHub (opens in new tab)">
+              GitHub
+              <svg class="external-link-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                <path fill-rule="evenodd" d="m8.5 2.5 3 3L6 12.5H3V9.5L8.5 2.5zM9 1 2 8v4h4L13 4 9 1z"/>
+              </svg>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+
+    <!-- Mobile navigation overlay -->
+    <div class="mobile-nav-overlay" aria-hidden="true">
+      <nav class="mobile-nav" role="navigation" aria-label="Mobile navigation">
+        <ul class="mobile-nav-list">
           <li><a href="{{ '/guide/' | relative_url }}">Guides</a></li>
           <li><a href="{{ '/api/' | relative_url }}">API</a></li>
-          <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}" target="_blank">GitHub</a></li>
+          <li><a href="https://github.com/{{ site.github_username }}/{{ site.repository }}" target="_blank" rel="noopener noreferrer">GitHub</a></li>
         </ul>
       </nav>
     </div>
   </div>
 </header>
+
+<!-- Search bar -->
+<div class="search-container">
+  <div class="container-lg px-3">
+    <div class="search-wrapper">
+      <input type="search"
+             id="search-input"
+             placeholder="Search documentation..."
+             aria-label="Search documentation"
+             autocomplete="off">
+      <button type="button" id="search-button" aria-label="Search">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <path fill-rule="evenodd" d="m11.5 7 3.5 3.5-1.5 1.5L10 8.5 6.5 12 5 10.5 8.5 7 5 3.5 6.5 2 10 5.5 13.5 2l1.5 1.5L11.5 7z"/>
+        </svg>
+      </button>
+      <div id="search-results" class="search-results" aria-live="polite" aria-atomic="true"></div>
+    </div>
+  </div>
+</div>
+
+<style>
+/* Skip link for accessibility */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 6px;
+  background: #0366d6;
+  color: white;
+  padding: 8px;
+  text-decoration: none;
+  border-radius: 4px;
+  z-index: 1000;
+  font-size: 14px;
+}
+
+.skip-link:focus {
+  top: 6px;
+}
+
+/* Mobile menu toggle */
+.mobile-menu-toggle {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.mobile-menu-toggle:hover {
+  background: rgba(177, 186, 196, 0.2);
+}
+
+.hamburger-line {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: #24292e;
+  margin: 4px 0;
+  transition: 0.3s;
+}
+
+/* Mobile navigation */
+@media (max-width: 768px) {
+  .mobile-menu-toggle {
+    display: block;
+  }
+
+  .site-nav {
+    display: none;
+  }
+
+  .mobile-nav-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+  }
+
+  .mobile-nav-overlay.active {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .mobile-nav {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 250px;
+  }
+
+  .mobile-nav-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .mobile-nav-list li {
+    margin: 1rem 0;
+  }
+
+  .mobile-nav-list a {
+    display: block;
+    padding: 0.75rem 1rem;
+    color: #24292e;
+    text-decoration: none;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+
+  .mobile-nav-list a:hover {
+    background: #f6f8fa;
+  }
+}
+
+/* Search functionality */
+.search-container {
+  background: #f6f8fa;
+  border-bottom: 1px solid #e1e4e8;
+  padding: 1rem 0;
+}
+
+.search-wrapper {
+  position: relative;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+#search-input {
+  width: 100%;
+  padding: 0.75rem 3rem 0.75rem 1rem;
+  border: 1px solid #d1d9e0;
+  border-radius: 6px;
+  font-size: 16px; /* Prevents zoom on iOS */
+  background: white;
+}
+
+#search-input:focus {
+  outline: none;
+  border-color: #0366d6;
+  box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.1);
+}
+
+#search-button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  color: #586069;
+}
+
+#search-button:hover {
+  background: #f6f8fa;
+  color: #24292e;
+}
+
+.search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #d1d9e0;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(149, 157, 165, 0.2);
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: none;
+}
+
+.search-results.show {
+  display: block;
+}
+
+/* Active navigation state */
+.site-nav-list .active {
+  font-weight: 600;
+  color: #0366d6;
+}
+
+/* External link indicator */
+.external-link-icon {
+  margin-left: 4px;
+  fill: currentColor;
+  opacity: 0.7;
+}
+</style>
+
+<script>
+// Mobile menu functionality
+document.addEventListener('DOMContentLoaded', function() {
+  const menuToggle = document.querySelector('.mobile-menu-toggle');
+  const mobileOverlay = document.querySelector('.mobile-nav-overlay');
+  const mobileNav = document.querySelector('.mobile-nav');
+
+  if (menuToggle && mobileOverlay) {
+    menuToggle.addEventListener('click', function() {
+      const isExpanded = this.getAttribute('aria-expanded') === 'true';
+      this.setAttribute('aria-expanded', !isExpanded);
+      mobileOverlay.classList.toggle('active');
+      mobileOverlay.setAttribute('aria-hidden', isExpanded);
+
+      // Animate hamburger icon
+      const lines = this.querySelectorAll('.hamburger-line');
+      if (!isExpanded) {
+        lines[0].style.transform = 'rotate(45deg) translate(5px, 5px)';
+        lines[1].style.opacity = '0';
+        lines[2].style.transform = 'rotate(-45deg) translate(7px, -6px)';
+      } else {
+        lines[0].style.transform = 'none';
+        lines[1].style.opacity = '1';
+        lines[2].style.transform = 'none';
+      }
+    });
+
+    // Close menu when clicking overlay
+    mobileOverlay.addEventListener('click', function(e) {
+      if (e.target === mobileOverlay) {
+        menuToggle.click();
+      }
+    });
+  }
+});
+</script>

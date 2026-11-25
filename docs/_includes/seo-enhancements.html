@@ -1,0 +1,219 @@
+<!-- Enhanced SEO and Performance Optimizations -->
+
+<!-- Additional Structured Data for Documentation Pages -->
+{% if page.layout == 'page' or page.collection %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "{{ page.title | default: site.title }}",
+  "description": "{{ page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | truncate: 160 }}",
+  "author": {
+    "@type": "Organization",
+    "name": "{{ site.author }}",
+    "url": "{{ site.social.links | first }}"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "{{ site.author }}",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "{{ site.logo | absolute_url }}"
+    }
+  },
+  "datePublished": "{{ page.date | date_to_xmlschema }}",
+  "dateModified": "{{ page.last_modified_at | date_to_xmlschema | default: page.date | date_to_xmlschema }}",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "{{ page.url | absolute_url }}"
+  },
+  "articleSection": "{{ page.collection | capitalize }}",
+  "keywords": "{{ page.keywords | default: site.keywords | join: ', ' }}",
+  "programmingLanguage": "Rust",
+  "teaches": "DNS Analysis, Network Security, Command Line Tools",
+  "educationalUse": "Professional Development",
+  "learningResourceType": "Documentation",
+  "audience": {
+    "@type": "EducationalAudience",
+    "educationalRole": "developer, security researcher, network administrator"
+  }
+}
+</script>
+{% endif %}
+
+<!-- Breadcrumb Structured Data -->
+{% if site.seo_advanced.breadcrumbs %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "{{ site.url }}"
+    }
+    {% assign crumbs = page.url | remove:'/index.html' | split: '/' %}
+    {% assign crumb_path = '' %}
+    {% for crumb in crumbs offset: 1 %}
+      {% assign crumb_path = crumb_path | append: '/' | append: crumb %}
+      ,{
+        "@type": "ListItem",
+        "position": {{ forloop.index | plus: 1 }},
+        "name": "{{ crumb | replace: '-', ' ' | capitalize }}",
+        "item": "{{ site.url }}{{ crumb_path }}"
+      }
+    {% endfor %}
+  ]
+}
+</script>
+{% endif %}
+
+<!-- HowTo Structured Data for Guide Pages -->
+{% if page.collection == 'guide' %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  "name": "{{ page.title }}",
+  "description": "{{ page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | truncate: 160 }}",
+  "image": "{{ page.og_image | default: site.og_image | absolute_url }}",
+  "totalTime": "PT{{ page.reading_time | default: 5 }}M",
+  "supply": [
+    {
+      "@type": "HowToSupply",
+      "name": "RDNSx"
+    },
+    {
+      "@type": "HowToSupply",
+      "name": "Rust 1.70+"
+    }
+  ],
+  "tool": [
+    {
+      "@type": "HowToTool",
+      "name": "Terminal/Command Line"
+    },
+    {
+      "@type": "HowToTool",
+      "name": "Text Editor"
+    }
+  ],
+  "step": [
+    {
+      "@type": "HowToStep",
+      "name": "Installation",
+      "text": "Install RDNSx using the appropriate method for your platform",
+      "url": "{{ site.url }}/guide/installation"
+    },
+    {
+      "@type": "HowToStep",
+      "name": "Configuration",
+      "text": "Configure RDNSx for your specific needs",
+      "url": "{{ site.url }}/guide/configuration"
+    },
+    {
+      "@type": "HowToStep",
+      "name": "Usage",
+      "text": "Execute DNS analysis commands",
+      "url": "{{ site.url }}/guide/quick-start"
+    }
+  ]
+}
+</script>
+{% endif %}
+
+<!-- Video Schema (if videos are added later) -->
+<!-- <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoObject",
+  "name": "RDNSx Quick Start Guide",
+  "description": "Learn how to use RDNSx for DNS analysis in under 5 minutes",
+  "thumbnailUrl": "{{ site.url }}/assets/images/video-thumbnail.jpg",
+  "uploadDate": "{{ page.date | date_to_xmlschema }}",
+  "duration": "PT5M",
+  "contentUrl": "{{ site.url }}/videos/rdnsx-quickstart.mp4",
+  "embedUrl": "{{ site.url }}/videos/rdnsx-quickstart.mp4",
+  "interactionStatistic": {
+    "@type": "InteractionCounter",
+    "interactionType": "https://schema.org/WatchAction",
+    "userInteractionCount": 1000
+  }
+}
+</script> -->
+
+<!-- Local Business Schema for Organization -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "TelcoSec",
+  "url": "{{ site.url }}",
+  "logo": "{{ site.logo | absolute_url }}",
+  "description": "Open source cybersecurity and networking tools development",
+  "foundingDate": "2024",
+  "sameAs": {{ site.social.links | jsonify }},
+  "contactPoint": {
+    "@type": "ContactPoint",
+    "contactType": "technical support",
+    "url": "https://github.com/TelcoSec-Tools/RDNSx/issues",
+    "availableLanguage": "English"
+  },
+  "areaServed": "Worldwide",
+  "serviceType": "Open Source Software Development"
+}
+</script>
+
+<!-- Search Engine Optimization Enhancements -->
+<meta name="robots" content="{{ site.seo_advanced.search_engine_optimization.meta_robots }}">
+<meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+<meta name="bingbot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+
+<!-- Preconnect to external domains for performance -->
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://github.com" crossorigin>
+
+<!-- DNS prefetch for faster loading -->
+<link rel="dns-prefetch" href="//fonts.googleapis.com">
+<link rel="dns-prefetch" href="//fonts.gstatic.com">
+<link rel="dns-prefetch" href="//github.com">
+<link rel="dns-prefetch" href="//www.google-analytics.com">
+<link rel="dns-prefetch" href="//www.googletagmanager.com">
+
+<!-- Resource hints for critical resources -->
+{% if page.image %}
+<link rel="preload" href="{{ page.image | absolute_url }}" as="image" type="image/webp">
+{% endif %}
+
+<!-- Font preloading for performance -->
+<link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"></noscript>
+
+<!-- Enhanced meta tags for better SEO -->
+<meta name="article:author" content="{{ page.author | default: site.author }}">
+<meta name="article:publisher" content="{{ site.url }}">
+<meta name="article:section" content="{{ page.collection | default: 'Documentation' }}">
+<meta name="article:tag" content="{{ page.keywords | default: site.keywords | join: ', ' }}">
+
+<!-- Mobile optimization -->
+<meta name="HandheldFriendly" content="True">
+<meta name="MobileOptimized" content="320">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Language and locale -->
+<meta http-equiv="content-language" content="{{ page.lang | default: site.lang | default: 'en-US' }}">
+<meta property="og:locale" content="{{ site.locale | default: 'en_US' }}">
+
+<!-- Performance and caching -->
+<meta http-equiv="Cache-Control" content="max-age=86400, public">
+<meta name="last-modified" content="{{ page.last_modified_at | date_to_xmlschema | default: page.date | date_to_xmlschema }}">
+
+<!-- Security headers -->
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<meta http-equiv="X-Frame-Options" content="DENY">
+<meta http-equiv="X-XSS-Protection" content="1; mode=block">
+<meta name="referrer" content="strict-origin-when-cross-origin"></contents>
+</xai:function_call">Writer
