@@ -303,10 +303,7 @@ impl CdnDetector {
             if !visited.insert(current.to_lowercase()) {
                 break;
             }
-            let Ok((lookup, _)) = self
-                .resolver_pool
-                .query(&current, RecordType::Cname)
-                .await
+            let Ok((lookup, _)) = self.resolver_pool.query(&current, RecordType::Cname).await
             else {
                 break;
             };
@@ -338,7 +335,9 @@ impl CdnDetector {
         if !self.asn_lookup {
             return None;
         }
-        let record = crate::asn::lookup_ip_asn(&self.resolver_pool, &ip).await.ok()?;
+        let record = crate::asn::lookup_ip_asn(&self.resolver_pool, &ip)
+            .await
+            .ok()?;
         Some(AsnInfo {
             asn: record.asn,
             organization: record
@@ -407,10 +406,9 @@ impl CdnDetector {
                     if let Some(name) = cdn_range(*ip) {
                         providers.insert(name.to_string());
                         if !range_hit {
-                            analysis.detection_reasons.push(format!(
-                                "{} is in {}'s published edge ranges",
-                                ip, name
-                            ));
+                            analysis
+                                .detection_reasons
+                                .push(format!("{} is in {}'s published edge ranges", ip, name));
                         }
                         range_hit = true;
                     }
@@ -433,7 +431,8 @@ impl CdnDetector {
             _ => 0.98,
         };
         analysis.detected_providers = providers.into_iter().collect();
-        result.cdn_provider = cname_provider.or_else(|| analysis.detected_providers.first().cloned());
+        result.cdn_provider =
+            cname_provider.or_else(|| analysis.detected_providers.first().cloned());
 
         if analysis.is_behind_cdn {
             analysis.security_implications.push(
@@ -530,7 +529,9 @@ fn provider_security_implications(provider: &str) -> Vec<String> {
         ],
         "Akamai" => &["Akamai Bot Manager may block or rate-limit automated scanning"],
         "Fastly" => &["Fastly edges may apply WAF rules (Next-Gen WAF)"],
-        "Amazon CloudFront" => &["CloudFront distributions are often paired with AWS WAF and Shield"],
+        "Amazon CloudFront" => {
+            &["CloudFront distributions are often paired with AWS WAF and Shield"]
+        }
         "Microsoft Azure CDN" | "Microsoft Azure Front Door" => {
             &["Azure Front Door may apply Azure WAF policies"]
         }
@@ -558,7 +559,10 @@ mod tests {
             identify_cdn_provider("d111111abcdef8.cloudfront.net."),
             Some("Amazon CloudFront")
         );
-        assert_eq!(identify_cdn_provider("e1234.a.akamaiedge.net"), Some("Akamai"));
+        assert_eq!(
+            identify_cdn_provider("e1234.a.akamaiedge.net"),
+            Some("Akamai")
+        );
         // Plain AWS, Google and Azure hosting names are not CDNs
         assert_eq!(identify_cdn_provider("bucket.s3.amazonaws.com"), None);
         assert_eq!(identify_cdn_provider("ghs.googlehosted.com"), None);
@@ -571,7 +575,10 @@ mod tests {
     #[test]
     fn published_ranges() {
         assert_eq!(cdn_range("104.16.1.1".parse().unwrap()), Some("Cloudflare"));
-        assert_eq!(cdn_range("2606:4700::1".parse().unwrap()), Some("Cloudflare"));
+        assert_eq!(
+            cdn_range("2606:4700::1".parse().unwrap()),
+            Some("Cloudflare")
+        );
         assert_eq!(cdn_range("151.101.1.1".parse().unwrap()), Some("Fastly"));
         // Ranges the old table got wrong
         assert_eq!(cdn_range("34.120.0.1".parse().unwrap()), None);

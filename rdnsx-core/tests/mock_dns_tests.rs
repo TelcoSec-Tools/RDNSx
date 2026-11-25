@@ -353,7 +353,12 @@ async fn zone_walk_crosses_delegations() {
     assert_eq!(result.stop_reason, "Walked the complete chain");
     assert_eq!(
         result.discovered_names,
-        vec!["deleg.test", "a.deleg.test", "sub.deleg.test", "www.deleg.test"]
+        vec![
+            "deleg.test",
+            "a.deleg.test",
+            "sub.deleg.test",
+            "www.deleg.test"
+        ]
     );
 }
 
@@ -442,7 +447,10 @@ async fn wildcard_analysis_reports_uncovered_types() {
     let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
     let enumerator = DnsEnumerator::new(pool);
 
-    let analysis = enumerator.wildcard_analysis("wild.rdnsx.test").await.unwrap();
+    let analysis = enumerator
+        .wildcard_analysis("wild.rdnsx.test")
+        .await
+        .unwrap();
     assert!(analysis.has_wildcard);
     // The mock wildcard only covers A, so the other types tell hosts apart
     assert!(!analysis.bypass_attempts.is_empty());

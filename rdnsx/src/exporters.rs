@@ -6,6 +6,7 @@ use rdnsx_core::{DnsRecord, Exporter};
 use crate::cli::Config;
 
 /// Cassandra tuning that only the CLI knows about
+#[cfg_attr(not(feature = "export-cassandra"), allow(dead_code))]
 #[derive(Debug, Clone, Copy)]
 pub struct CassandraTuning {
     pub batch_size: usize,

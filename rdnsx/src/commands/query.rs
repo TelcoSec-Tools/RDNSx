@@ -193,9 +193,10 @@ pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
     let resolver_pool = Arc::new(ResolverPool::new(&dns_options)?);
     let client = DnsxClient::from_pool(Arc::clone(&resolver_pool));
 
-    let wildcard_filter: Option<WildcardFilter> = args.wildcard_domain.as_ref().map(|base| {
-        WildcardFilter::new(Some(base.clone()), Arc::clone(&resolver_pool), 3)
-    });
+    let wildcard_filter: Option<WildcardFilter> = args
+        .wildcard_domain
+        .as_ref()
+        .map(|base| WildcardFilter::new(Some(base.clone()), Arc::clone(&resolver_pool), 3));
 
     let allowed_rcodes = parse_rcodes(&args.rcode)?;
 
@@ -314,9 +315,9 @@ pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
         for record in &records {
             let asn = if args.asn {
                 match &record.value {
-                    RecordValue::Ip(ip) => {
-                        rdnsx_core::asn::lookup_ip_asn(&resolver_pool, ip).await.ok()
-                    }
+                    RecordValue::Ip(ip) => rdnsx_core::asn::lookup_ip_asn(&resolver_pool, ip)
+                        .await
+                        .ok(),
                     _ => None,
                 }
             } else {
@@ -341,7 +342,11 @@ pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
             "Processed {} domains, collected {} records ({:.1} queries/s)",
             total_domains,
             total_records,
-            if secs > 0.0 { total_queries as f64 / secs } else { 0.0 }
+            if secs > 0.0 {
+                total_queries as f64 / secs
+            } else {
+                0.0
+            }
         );
         if let Some(cached) = &cached_client {
             let stats = cached.cache_stats();

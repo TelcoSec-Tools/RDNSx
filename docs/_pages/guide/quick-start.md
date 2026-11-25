@@ -123,17 +123,17 @@ rdnsx --config my-config.toml query example.com
 
 ### Increase Concurrency
 ```bash
-rdnsx query --threads 100 domains.txt
+rdnsx query --threads 100 --list domains.txt
 ```
 
 ### Adjust Timeout
 ```bash
-rdnsx query --timeout 10 domains.txt
+rdnsx query --timeout 10 --list domains.txt
 ```
 
 ### Rate Limiting
 ```bash
-rdnsx query --rate-limit 50 domains.txt
+rdnsx query --rate-limit 50 --list domains.txt
 ```
 
 ## Advanced Enumeration

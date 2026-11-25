@@ -569,9 +569,7 @@ async fn find_nsec(
             .iter()
             .chain(msg.authorities.iter())
             .find_map(|r| match &r.data {
-                RData::DNSSEC(DNSSECRData::NSEC(nsec)) if r.name == *owner => {
-                    Some(nsec.clone())
-                }
+                RData::DNSSEC(DNSSECRData::NSEC(nsec)) if r.name == *owner => Some(nsec.clone()),
                 _ => None,
             })
     };
@@ -590,7 +588,9 @@ async fn find_nsec(
 
 /// `owner` with a zero byte appended to its first label: the closest name that
 /// sorts after `owner` and its whole subtree in canonical DNS order.
-pub fn name_after(owner: &hickory_resolver::proto::rr::Name) -> Option<hickory_resolver::proto::rr::Name> {
+pub fn name_after(
+    owner: &hickory_resolver::proto::rr::Name,
+) -> Option<hickory_resolver::proto::rr::Name> {
     let mut labels: Vec<Vec<u8>> = owner.iter().map(|l| l.to_vec()).collect();
     let first = labels.first_mut()?;
     if first.len() >= 63 {

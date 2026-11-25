@@ -286,10 +286,7 @@ impl EmailSecurityEnumerator {
                 Some(q @ ('+' | '-' | '~' | '?')) => (q, &lower[1..]),
                 _ => ('+', lower.as_str()),
             };
-            let name = mechanism
-                .split([':', '/', '='])
-                .next()
-                .unwrap_or_default();
+            let name = mechanism.split([':', '/', '=']).next().unwrap_or_default();
             match name {
                 "all" => {
                     analysis.has_all = true;
@@ -403,9 +400,9 @@ impl EmailSecurityEnumerator {
                     .warnings
                     .push("DMARC record has no 'p' (policy) tag".to_string());
             }
-            Some("none") => analysis.warnings.push(
-                "p=none only monitors: spoofed mail is still delivered".to_string(),
-            ),
+            Some("none") => analysis
+                .warnings
+                .push("p=none only monitors: spoofed mail is still delivered".to_string()),
             _ => {}
         }
         if analysis.subdomain_policy.as_deref() == Some("none")
@@ -477,8 +474,8 @@ mod dkim_tests {
 
     fn spf(record: &str) -> SpfAnalysis {
         // analyze_spf does not touch the resolver pool
-        let pool = crate::resolver::ResolverPool::new(&crate::config::DnsxOptions::default())
-            .unwrap();
+        let pool =
+            crate::resolver::ResolverPool::new(&crate::config::DnsxOptions::default()).unwrap();
         EmailSecurityEnumerator::new(std::sync::Arc::new(pool)).analyze_spf(record)
     }
 
@@ -487,9 +484,18 @@ mod dkim_tests {
         let a = spf("v=spf1 include:_spf.google.com mx a ptr ~all");
         assert_eq!(a.dns_lookups, 4);
         assert!(a.warnings.iter().any(|w| w.contains("ptr")));
-        assert!(spf("v=spf1 +all").warnings.iter().any(|w| w.contains("+all")));
-        assert!(spf("v=spf1 all").warnings.iter().any(|w| w.contains("+all")));
-        let many = (0..11).map(|i| format!("include:s{}.example", i)).collect::<Vec<_>>().join(" ");
+        assert!(spf("v=spf1 +all")
+            .warnings
+            .iter()
+            .any(|w| w.contains("+all")));
+        assert!(spf("v=spf1 all")
+            .warnings
+            .iter()
+            .any(|w| w.contains("+all")));
+        let many = (0..11)
+            .map(|i| format!("include:s{}.example", i))
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(spf(&format!("v=spf1 {} -all", many))
             .warnings
             .iter()

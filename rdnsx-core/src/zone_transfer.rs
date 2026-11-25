@@ -107,7 +107,11 @@ impl ZoneTransferEnumerator {
                             "Zone transfer from {}: {} records{}",
                             label,
                             outcome.records.len(),
-                            if outcome.complete { "" } else { " (incomplete)" }
+                            if outcome.complete {
+                                ""
+                            } else {
+                                " (incomplete)"
+                            }
                         );
                         results.successful_transfers.push(label.clone());
                         if !outcome.complete {
@@ -115,8 +119,8 @@ impl ZoneTransferEnumerator {
                         }
                         // Every address serves the same zone: keep the first complete
                         // copy, or a partial one until a complete copy turns up
-                        let better = results.records.is_empty()
-                            || (outcome.complete && !results.complete);
+                        let better =
+                            results.records.is_empty() || (outcome.complete && !results.complete);
                         if better {
                             results.records = outcome.records;
                             results.complete = outcome.complete;

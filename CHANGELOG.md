@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- CDN detection reports a CDN only on direct evidence (CNAME suffix, CDN edge AS, published edge ranges); cloud hosting alone no longer counts, and the TTL and resolver-timing signals are gone
+- The built-in provider IP table (which had wrong and overlapping ranges) is replaced by Cloudflare's and Fastly's published ranges, used only when the live ASN lookup is unavailable
+- CNAME provider matching uses whole-label suffixes (S3, `googlehosted.com` and `azurewebsites.net` are no longer called CDNs)
+- `retries` now works: the per-resolver timeout covers all attempts
+- Zone walking continues across delegations and recognises synthesized minimal NSEC ("black lies"), which DNSSEC analysis no longer reports as walkable
+- Zone transfers that stop before the closing SOA are flagged as incomplete; skipped record types are counted
+- Wildcard filtering also drops wildcard CNAME chains; wildcard analysis reports which record types the wildcard does not answer instead of invalid-name "bypass" probes
+- `query` streams: input is read lazily and results are written as each domain completes (`--stream` is now a no-op)
+- `query` prints errors even with `--silent` and exits non-zero when every query failed; unknown `-t` types and `--rcode` names are errors
+- `query --asn` is implemented (origin AS, prefix, registry country)
+- `passive-dns` no longer sends active queries; SPF/DMARC analysis is run and reported (lookup count, `+all`, `?all`, `ptr`, several SPF records, `p=none`, DMARC parent-domain fallback)
+- Exports work for `bruteforce`, `ptr` and zone transfers, not only `query`
+- `enumerate` uses `--threads` unless `--concurrent` is given; `--no-asn-lookup` keeps CDN detection local
+- Server fingerprinting tests TCP with a real DNS query; LOC and URI records are decoded; AFSDB can be queried; OPT is no longer offered as a query type
+- Response codes YXDOMAIN, YXRRSET, NXRRSET, NOTAUTH, NOTZONE are reported by name instead of as SERVFAIL
+- README and docs: install from git or GHCR (the crates.io and Docker Hub commands did not work), unsupported performance claims removed, third-party lookups documented; the CLI crate declares a version for its `rdnsx-core` dependency so it can be published
 - Wildcard analysis detects wildcards served from round-robin pools (different IPs per name)
 - Response codes are now reported: NXDOMAIN, NODATA and SERVFAIL are kept apart, and `--rcode` prints negative answers (`name [NXDOMAIN]`)
 - Resolver failover: SERVFAIL, REFUSED and timeouts move on to the next resolver instead of failing the query

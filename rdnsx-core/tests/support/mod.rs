@@ -280,9 +280,11 @@ impl MockZone {
         if let Some(cut) = self.delegation_for(query.name(), query.query_type()) {
             // Referral: no answer, NS (and NSEC for the unsigned cut) in authority
             response.metadata.authoritative = false;
-            for r in self.records.iter().filter(|r| {
-                &r.name == cut && r.record_type() == RecordType::NS
-            }) {
+            for r in self
+                .records
+                .iter()
+                .filter(|r| &r.name == cut && r.record_type() == RecordType::NS)
+            {
                 response.add_authority(r.clone());
             }
             return vec![response];

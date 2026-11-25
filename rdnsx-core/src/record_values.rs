@@ -201,7 +201,13 @@ impl std::fmt::Display for RecordValue {
                 // centimetres above a base 100,000 m below the WGS 84 spheroid
                 let deg = |v: u32| (f64::from(v) - 2_147_483_648.0) / 3_600_000.0;
                 let alt = f64::from(*altitude) / 100.0 - 100_000.0;
-                write!(f, "{:.6} {:.6} {:.2}m", deg(*latitude), deg(*longitude), alt)
+                write!(
+                    f,
+                    "{:.6} {:.6} {:.2}m",
+                    deg(*latitude),
+                    deg(*longitude),
+                    alt
+                )
             }
             RecordValue::Naptr {
                 order,

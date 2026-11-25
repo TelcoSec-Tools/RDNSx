@@ -72,13 +72,13 @@ OPTIONS:
         --naptr                            NAPTR records
         --nsec                             NSEC records
         --nsec3                            NSEC3 records
-        --opt                              OPT records
+        --afsdb                            AFSDB records
         --rrsig                            RRSIG records
         --sshfp                            SSHFP records
         --svcb                             SVCB records
         --tlsa                             TLSA records
         --uri                              URI records
-        --asn                              ASN information
+        --asn                              Origin AS, prefix and registry country of each address (Team Cymru)
         --rcode <RCODE>                    Filter by response code (comma-separated, e.g. NXDOMAIN,SERVFAIL).
                                            Negative answers are printed as "name [NXDOMAIN]"
     -w, --wildcard-domain <DOMAIN>         Domain for wildcard detection
@@ -98,7 +98,7 @@ RDNSx supports comprehensive DNS record type querying:
 - **Certificate Records**: `CAA` (CA authorization), `TLSA` (DANE), `CERT`
 - **Special Records**: `PTR` (reverse DNS), `LOC` (geolocation), `HINFO` (host info)
 - **Modern Records**: `HTTPS`, `SVCB` (HTTP upgrades), `SSHFP` (SSH keys)
-- **Legacy Records**: `AFSDB`, `KEY`, `OPT` (extensions)
+- **Legacy Records**: `AFSDB`, `KEY`
 
 #### Examples
 
@@ -201,24 +201,31 @@ OPTIONS:
         --fingerprint-servers <LIST> Servers to fingerprint (default: the target if it is a server,
                                      otherwise the zone's authoritative nameservers)
         --max-names <N>              Name limit for DNSSEC zone walking (default: 1000)
-        --concurrent <N>             Maximum concurrent queries
+        --concurrent <N>             Maximum concurrent queries (default: --threads)
+        --no-asn-lookup              CDN detection without Team Cymru lookups
     (plus the global options)
 ```
 
 What each technique does:
 
 - **zone-transfer**: AXFR over TCP against every address (IPv4 and IPv6) of each authoritative nameserver.
-- **email-security**: SPF, DMARC and DKIM (about 30 common selectors under `_domainkey`).
+  Transfers that stop before the closing SOA are listed as incomplete.
+- **email-security**: SPF, DMARC and DKIM (about 30 common selectors under `_domainkey`). SPF is checked
+  for `+all`/`?all`, `ptr`, several records and the 10-lookup limit; DMARC falls back to parent domains and
+  flags `p=none`.
 - **server-fingerprint**: queries the server directly for `version.bind`, `hostname.bind`, `id.server`
-  (CHAOS), open recursion, EDNS(0), DNSSEC signatures and TCP support.
+  (CHAOS), open recursion, EDNS(0), DNSSEC signatures and TCP support (a real query over TCP).
 - **dnssec-enumeration**: DNSKEY/DS records, RRSIGs and NSEC/NSEC3 from an authoritative server, a DS-to-DNSKEY
   match check, and full signature validation from the root trust anchor.
-- **dnssec-zone-walking**: follows the NSEC chain from the apex on an authoritative server. NSEC3 zones are
-  detected and reported as not walkable.
-- **cdn-detection**: CNAME chain, provider patterns, and origin ASN/country from the Team Cymru IP-to-ASN DNS
-  service. Provider IP ranges built into the tool are only a fallback and are marked `"source": "heuristic"`.
-- **passive-dns**: Certificate Transparency names from crt.sh (with first/last logged dates), plus an
-  active probe of a few common names (labelled `active_probe`). Failed sources are listed.
+- **dnssec-zone-walking**: follows the NSEC chain from the apex on an authoritative server, including across
+  delegations. NSEC3 zones and synthesized minimal NSEC ("black lies", compact denial) are detected and
+  reported as not walkable.
+- **cdn-detection**: reports a CDN only on direct evidence: a CNAME to a known CDN suffix, an address announced
+  by a CDN edge AS (Team Cymru lookup), or an address in Cloudflare's or Fastly's published ranges. Cloud
+  hosting (AWS, Google Cloud, Azure...) is reported as hosting, not as a CDN. The country is the RIR
+  registration country of the prefix.
+- **passive-dns**: Certificate Transparency names from crt.sh (with first/last logged dates). No DNS queries
+  are sent for the target. Failed sources are listed.
 
 #### Examples
 

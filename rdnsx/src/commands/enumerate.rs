@@ -240,7 +240,8 @@ async fn perform_zone_transfer(
             }
 
             if !result.incomplete_transfers.is_empty() {
-                output.write_line("\n⚠️  Incomplete transfers (stopped before the closing SOA):")?;
+                output
+                    .write_line("\n⚠️  Incomplete transfers (stopped before the closing SOA):")?;
                 for ns in &result.incomplete_transfers {
                     output.write_line(&format!("  • {}", ns))?;
                 }
@@ -458,7 +459,10 @@ async fn perform_cdn_detection(
             {
                 output.write_line(&format!(
                     "\n🏢 Owner of {}: AS{} {} ({}, registry country {})",
-                    result.origin_ip.map(|ip| ip.to_string()).unwrap_or_default(),
+                    result
+                        .origin_ip
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_default(),
                     asn.asn,
                     asn.organization,
                     asn.prefix.as_deref().unwrap_or("?"),
