@@ -1,5 +1,6 @@
 //! CDN detection and analysis
 
+use crate::hickory_ext::LookupExt;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tracing::info;
@@ -142,13 +143,11 @@ impl CdnDetector {
             .query(&cname_result.final_domain, crate::RecordType::A)
             .await
         {
-            for record in lookup.records() {
-                if let hickory_resolver::proto::rr::RData::A(ip) =
-                    record.data().expect("Record data missing")
-                {
-                    let ip_addr = IpAddr::V4(**ip);
+            for record in lookup.answers() {
+                if let hickory_resolver::proto::rr::RData::A(ip) = &record.data {
+                    let ip_addr = IpAddr::V4(ip.0);
                     all_ips.push(ip_addr);
-                    all_ttls.push(record.ttl());
+                    all_ttls.push(record.ttl);
                 }
             }
 

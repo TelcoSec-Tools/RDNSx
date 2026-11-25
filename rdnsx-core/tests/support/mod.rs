@@ -10,8 +10,8 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use hickory_resolver::proto::dnssec::rdata::{DNSSECRData, NSEC};
 use hickory_resolver::proto::op::{Edns, Message, MessageType, OpCode, ResponseCode};
-use hickory_resolver::proto::rr::dnssec::rdata::{DNSSECRData, NSEC};
 use hickory_resolver::proto::rr::rdata::{A, CNAME, NS, SOA, TXT};
 use hickory_resolver::proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -84,7 +84,7 @@ impl MockZone {
         self.records.push(Record::from_rdata(
             name(owner),
             300,
-            RData::TXT(TXT::new(vec![text.to_string()])),
+            RData::TXT(TXT::try_new(std::iter::once(text.as_bytes().to_vec())).unwrap()),
         ));
         self
     }
@@ -113,7 +113,7 @@ impl MockZone {
         let exact: Vec<Record> = self
             .records
             .iter()
-            .filter(|r| r.name() == qname && r.record_type() == qtype)
+            .filter(|r| &r.name == qname && r.record_type() == qtype)
             .cloned()
             .collect();
         if !exact.is_empty() {
@@ -124,17 +124,17 @@ impl MockZone {
         if let Some(cname) = self
             .records
             .iter()
-            .find(|r| r.name() == qname && r.record_type() == RecordType::CNAME)
+            .find(|r| &r.name == qname && r.record_type() == RecordType::CNAME)
         {
             let mut answers = vec![cname.clone()];
-            if let Some(RData::CNAME(target)) = cname.data() {
+            if let RData::CNAME(target) = &cname.data {
                 let (_, mut rest) = self.lookup(&target.0, qtype);
                 answers.append(&mut rest);
             }
             return (ResponseCode::NoError, answers);
         }
 
-        if self.records.iter().any(|r| r.name() == qname) {
+        if self.records.iter().any(|r| &r.name == qname) {
             return (ResponseCode::NoError, Vec::new()); // NODATA
         }
 
@@ -156,21 +156,18 @@ impl MockZone {
     }
 
     fn respond(&self, request: &Message) -> Vec<Message> {
-        let mut response = Message::new();
-        response.set_id(request.id());
-        response.set_message_type(MessageType::Response);
-        response.set_op_code(OpCode::Query);
-        response.set_authoritative(true);
-        response.set_recursion_desired(request.recursion_desired());
-        response.set_recursion_available(false);
-        if request.extensions().is_some() {
+        let mut response = Message::new(request.id, MessageType::Response, OpCode::Query);
+        response.metadata.authoritative = true;
+        response.metadata.recursion_desired = request.recursion_desired;
+        response.metadata.recursion_available = false;
+        if request.edns.is_some() {
             let mut edns = Edns::new();
             edns.set_max_payload(1232);
             response.set_edns(edns);
         }
 
-        let Some(query) = request.queries().first().cloned() else {
-            response.set_response_code(ResponseCode::FormErr);
+        let Some(query) = request.queries.first().cloned() else {
+            response.metadata.response_code = ResponseCode::FormErr;
             return vec![response];
         };
         response.add_query(query.clone());
@@ -180,19 +177,19 @@ impl MockZone {
                 let mut rec = Record::from_rdata(
                     query.name().clone(),
                     0,
-                    RData::TXT(TXT::new(vec!["mock-dns 1.0".to_string()])),
+                    RData::TXT(TXT::try_new(std::iter::once(b"mock-dns 1.0".to_vec())).unwrap()),
                 );
-                rec.set_dns_class(DNSClass::CH);
+                rec.dns_class = DNSClass::CH;
                 response.add_answer(rec);
             } else {
-                response.set_response_code(ResponseCode::Refused);
+                response.metadata.response_code = ResponseCode::Refused;
             }
             return vec![response];
         }
 
         if query.query_type() == RecordType::AXFR {
             if !self.allow_axfr {
-                response.set_response_code(ResponseCode::Refused);
+                response.metadata.response_code = ResponseCode::Refused;
                 return vec![response];
             }
             let soa = self.soa().expect("zone has SOA");
@@ -218,13 +215,13 @@ impl MockZone {
         }
 
         let (rcode, answers) = self.lookup(query.name(), query.query_type());
-        response.set_response_code(rcode);
+        response.metadata.response_code = rcode;
         for answer in answers {
             response.add_answer(answer);
         }
-        if response.answers().is_empty() {
+        if response.answers.is_empty() {
             if let Some(soa) = self.soa() {
-                response.add_name_server(soa);
+                response.add_authority(soa);
             }
         }
         vec![response]

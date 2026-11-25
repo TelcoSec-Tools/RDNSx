@@ -134,11 +134,8 @@ impl ZoneTransferEnumerator {
                 }
             };
 
-        let mut message = Message::new();
-        message.set_id(rand::random());
-        message.set_message_type(MessageType::Query);
-        message.set_op_code(OpCode::Query);
-        message.set_recursion_desired(false);
+        let mut message = Message::new(rand::random(), MessageType::Query, OpCode::Query);
+        message.metadata.recursion_desired = false;
 
         let mut name = Name::from_str(domain).map_err(|e| {
             DnsxError::invalid_input(format!("Invalid domain name {}: {}", domain, e))
@@ -241,7 +238,7 @@ impl ZoneTransferEnumerator {
             let response = Message::read(&mut decoder)
                 .map_err(|e| DnsxError::Other(format!("Failed to decode AXFR response: {}", e)))?;
 
-            let rcode = response.response_code();
+            let rcode = response.response_code;
             if rcode != HResponseCode::NoError {
                 return Err(DnsxError::Other(format!(
                     "Zone transfer refused or failed: RCODE {}",
@@ -249,7 +246,7 @@ impl ZoneTransferEnumerator {
                 )));
             }
 
-            let answers = response.answers();
+            let answers = response.answers;
             if answers.is_empty() && all_records.is_empty() {
                 return Err(DnsxError::Other(
                     "Zone transfer returned 0 records (empty answer)".to_string(),
@@ -264,13 +261,13 @@ impl ZoneTransferEnumerator {
                     continue;
                 };
 
-                if let Some(rdata) = record.data() {
-                    if let Ok(val) = crate::query::parse_rdata(rdata) {
+                {
+                    if let Ok(val) = crate::query::parse_rdata(&record.data) {
                         let dns_rec = DnsRecord::new(
-                            record.name().to_string().trim_end_matches('.').to_string(),
+                            record.name.to_string().trim_end_matches('.').to_string(),
                             rtype,
                             val,
-                            record.ttl(),
+                            record.ttl,
                             crate::ResponseCode::NoError,
                             format!("{} ({})", nameserver, addr),
                             0.0,

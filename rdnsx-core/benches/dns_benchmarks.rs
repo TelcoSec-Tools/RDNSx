@@ -13,9 +13,12 @@ use rdnsx_core::{DnsRecord, RecordType, RecordValue, ResponseCode};
 
 fn bench_parse_rdata(c: &mut Criterion) {
     let a_record = RData::A(A(Ipv4Addr::new(192, 168, 1, 1)));
-    let txt_record = RData::TXT(TXT::new(vec![
-        "v=spf1 include:_spf.example.com -all".to_string()
-    ]));
+    let txt_record = RData::TXT(
+        TXT::try_new(std::iter::once(
+            b"v=spf1 include:_spf.example.com -all".to_vec(),
+        ))
+        .unwrap(),
+    );
 
     c.bench_function("parse_rdata_a", |b| {
         b.iter(|| parse_rdata(black_box(&a_record)))

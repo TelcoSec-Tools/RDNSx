@@ -5,6 +5,7 @@
 //! `AS13335.asn.cymru.com TXT` returns
 //! `"13335 | US | arin | 2010-07-14 | CLOUDFLARENET, US"`.
 
+use crate::hickory_ext::{LookupExt, TxtExt};
 use std::net::IpAddr;
 
 use hickory_resolver::proto::rr::RData;
@@ -69,14 +70,15 @@ pub fn parse_as_name_txt(txt: &str) -> Option<String> {
 
 async fn first_txt(pool: &ResolverPool, name: &str) -> Result<Option<String>> {
     let (lookup, _) = pool.query(name, RecordType::Txt).await?;
-    Ok(lookup.iter().find_map(|rdata| match rdata {
+    let txt = lookup.iter().find_map(|rdata| match rdata {
         RData::TXT(txt) => Some(
             txt.iter()
                 .map(|b| String::from_utf8_lossy(b).to_string())
                 .collect::<String>(),
         ),
         _ => None,
-    }))
+    });
+    Ok(txt)
 }
 
 /// Look up the origin AS (and its name) for an IP address

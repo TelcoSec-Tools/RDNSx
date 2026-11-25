@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Wildcard analysis detects wildcards served from round-robin pools (different IPs per name)
 - Response codes are now reported: NXDOMAIN, NODATA and SERVFAIL are kept apart, and `--rcode` prints negative answers (`name [NXDOMAIN]`)
 - Resolver failover: SERVFAIL, REFUSED and timeouts move on to the next resolver instead of failing the query
 - CNAME chains: every record is labelled with its real owner name and type
@@ -34,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Cargo.lock` is committed and builds use `--locked`
 
 ### Changed
+- Upgraded hickory-resolver to 0.26 (TLS/HTTPS via ring and webpki roots)
+- Dependency updates: rand 0.10, toml 1, thiserror 2, dashmap 6, ipnetwork 0.21, criterion 0.8
 - Minimum supported Rust version is 1.94
 - CI: clippy on all targets, a `--no-default-features` check, MSRV check, fixed Docker paths, macOS builds on Apple Silicon
 - Removed the duplicate `pages.yml` workflow and the stray `check_output.txt`

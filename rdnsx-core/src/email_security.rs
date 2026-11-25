@@ -1,5 +1,6 @@
 //! Email security record enumeration (SPF, DMARC, DKIM)
 
+use crate::hickory_ext::{LookupExt, TxtExt};
 use std::sync::Arc;
 use tracing::info;
 

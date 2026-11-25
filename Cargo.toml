@@ -19,7 +19,7 @@ categories = ["network-programming", "command-line-utilities"]
 tokio = { version = "1.35", features = ["full"] }
 
 # DNS
-hickory-resolver = { version = "0.24", features = ["dns-over-rustls", "dns-over-https-rustls", "dns-over-tls", "dns-over-https", "system-config", "dnssec-ring"] }
+hickory-resolver = { version = "0.26", features = ["tls-ring", "https-ring", "webpki-roots", "system-config", "dnssec-ring", "tokio"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -42,7 +42,6 @@ futures = "0.3"
 parking_lot = "0.12"
 
 # Utilities
-regex = "1.10"
 ipnetwork = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 

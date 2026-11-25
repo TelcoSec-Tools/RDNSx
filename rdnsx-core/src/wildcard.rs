@@ -1,5 +1,6 @@
 //! Wildcard DNS filtering
 
+use crate::hickory_ext::LookupExt;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -89,21 +90,23 @@ impl WildcardFilter {
             confidence_score: 0.0,
         };
 
-        // Test multiple random subdomains for consistency
-        let mut test_results = Vec::new();
-        for _ in 0..5 {
+        // Resolve several random subdomains. A wildcard answers all of them; wildcards
+        // backed by round-robin pools may return a different subset of IPs each time.
+        const PROBES: usize = 5;
+        let mut probe_ips: Vec<std::collections::BTreeSet<String>> = Vec::new();
+        for _ in 0..PROBES {
             let test_domain = Self::random_subdomain(domain);
             if let Ok((lookup, _)) = self.resolver_pool.query(&test_domain, RecordType::A).await {
+                let mut ips = std::collections::BTreeSet::new();
                 for rdata in lookup.iter() {
                     if let hickory_resolver::proto::rr::RData::A(ip) = rdata {
-                        let ip_str = ip.to_string();
-                        test_results.push(ip_str.clone());
+                        ips.insert(ip.to_string());
 
                         // Store the wildcard record
                         let record = DnsRecord {
                             domain: test_domain.clone(),
                             record_type: crate::types::RecordType::A,
-                            value: crate::types::RecordValue::Ip(std::net::IpAddr::V4(**ip)),
+                            value: crate::types::RecordValue::Ip(std::net::IpAddr::V4(ip.0)),
                             ttl: 300,
                             response_code: crate::types::ResponseCode::NoError,
                             resolver: "".to_string(),
@@ -113,29 +116,24 @@ impl WildcardFilter {
                         analysis.wildcard_records.push(record);
                     }
                 }
+                if !ips.is_empty() {
+                    probe_ips.push(ips);
+                }
             }
         }
 
-        // Analyze results for wildcard patterns
-        if !test_results.is_empty() {
-            // Check if all test domains resolve to the same IP (strong wildcard indicator)
-            let first_ip = &test_results[0];
-            let all_same = test_results.iter().all(|ip| ip == first_ip);
-
-            if all_same && test_results.len() >= 3 {
-                analysis.has_wildcard = true;
-                analysis.wildcard_ips.push(first_ip.clone());
-                analysis.confidence_score = 0.9;
-            } else {
-                // Check for patterns in IPs (weaker indicator)
-                let unique_ips: std::collections::HashSet<_> =
-                    test_results.iter().cloned().collect();
-                if unique_ips.len() == 1 {
-                    analysis.has_wildcard = true;
-                    analysis.wildcard_ips.extend(unique_ips);
-                    analysis.confidence_score = 0.7;
-                }
-            }
+        // Most random names resolving is a wildcard; identical answers raise confidence
+        if probe_ips.len() >= 3 {
+            let all_same = probe_ips.iter().all(|ips| ips == &probe_ips[0]);
+            let union: std::collections::BTreeSet<String> =
+                probe_ips.iter().flatten().cloned().collect();
+            analysis.has_wildcard = true;
+            analysis.wildcard_ips.extend(union);
+            analysis.confidence_score = match (all_same, probe_ips.len() == PROBES) {
+                (true, true) => 0.95,
+                (true, false) | (false, true) => 0.8,
+                (false, false) => 0.6,
+            };
         }
 
         // Attempt wildcard bypass techniques

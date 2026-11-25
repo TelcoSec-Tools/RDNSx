@@ -30,7 +30,6 @@ tracing = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
-regex = { workspace = true }
 ipnetwork = { workspace = true }
 chrono = { workspace = true }
 elasticsearch = { workspace = true, optional = true }
