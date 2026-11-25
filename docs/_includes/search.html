@@ -1,0 +1,298 @@
+<!-- Search Functionality -->
+<script>
+// Simple search implementation
+class DocumentationSearch {
+  constructor() {
+    this.searchIndex = [];
+    this.searchInput = document.getElementById('search-input');
+    this.searchButton = document.getElementById('search-button');
+    this.searchResults = document.getElementById('search-results');
+
+    this.init();
+  }
+
+  init() {
+    if (!this.searchInput || !this.searchResults) return;
+
+    // Build search index from page content
+    this.buildSearchIndex();
+
+    // Event listeners
+    this.searchInput.addEventListener('input', this.debounce(this.handleSearch.bind(this), 300));
+    this.searchInput.addEventListener('keydown', this.handleKeydown.bind(this));
+    this.searchButton.addEventListener('click', this.handleSearch.bind(this));
+
+    // Close results when clicking outside
+    document.addEventListener('click', this.handleClickOutside.bind(this));
+  }
+
+  buildSearchIndex() {
+    // Index current page content
+    const pageContent = document.body.textContent || '';
+    const pageTitle = document.title;
+    const pageUrl = window.location.pathname;
+
+    this.searchIndex = [{
+      title: pageTitle,
+      content: pageContent.substring(0, 1000), // Limit content length
+      url: pageUrl,
+      type: 'page'
+    }];
+
+    // Index headings for better navigation
+    const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    headings.forEach((heading, index) => {
+      if (heading.id) {
+        this.searchIndex.push({
+          title: heading.textContent.trim(),
+          content: heading.textContent.trim(),
+          url: `${pageUrl}#${heading.id}`,
+          type: 'heading'
+        });
+      }
+    });
+
+    // Index code blocks
+    const codeBlocks = document.querySelectorAll('pre code');
+    codeBlocks.forEach((code, index) => {
+      const text = code.textContent.trim();
+      if (text.length > 10) { // Only index meaningful code
+        this.searchIndex.push({
+          title: `Code example ${index + 1}`,
+          content: text,
+          url: `${pageUrl}#code-${index}`,
+          type: 'code'
+        });
+      }
+    });
+  }
+
+  handleSearch() {
+    const query = this.searchInput.value.trim().toLowerCase();
+    if (query.length < 2) {
+      this.hideResults();
+      return;
+    }
+
+    const results = this.search(query);
+    this.displayResults(results, query);
+  }
+
+  search(query) {
+    const terms = query.toLowerCase().split(/\s+/);
+    const results = [];
+
+    this.searchIndex.forEach(item => {
+      let score = 0;
+      const title = item.title.toLowerCase();
+      const content = item.content.toLowerCase();
+
+      terms.forEach(term => {
+        // Title matches are more important
+        if (title.includes(term)) {
+          score += 10;
+          if (title.startsWith(term)) score += 5; // Prefix matches
+        }
+
+        // Content matches
+        const contentMatches = (content.match(new RegExp(term, 'g')) || []).length;
+        score += contentMatches;
+
+        // Exact phrase matches
+        if (content.includes(query)) score += 15;
+        if (title.includes(query)) score += 20;
+      });
+
+      if (score > 0) {
+        results.push({
+          ...item,
+          score,
+          snippet: this.generateSnippet(item.content, query)
+        });
+      }
+    });
+
+    // Sort by score and return top 10
+    return results
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+  }
+
+  generateSnippet(content, query) {
+    const index = content.toLowerCase().indexOf(query.toLowerCase());
+    if (index === -1) return content.substring(0, 100);
+
+    const start = Math.max(0, index - 50);
+    const end = Math.min(content.length, index + query.length + 50);
+    let snippet = content.substring(start, end);
+
+    if (start > 0) snippet = '...' + snippet;
+    if (end < content.length) snippet = snippet + '...';
+
+    return snippet;
+  }
+
+  displayResults(results, query) {
+    if (results.length === 0) {
+      this.searchResults.innerHTML = '<div class="search-result-item">No results found</div>';
+    } else {
+      const html = results.map(result => `
+        <div class="search-result-item">
+          <a href="${result.url}" class="search-result-link">
+            <div class="search-result-title">${this.highlightText(result.title, query)}</div>
+            <div class="search-result-snippet">${this.highlightText(result.snippet, query)}</div>
+            <div class="search-result-type">${result.type}</div>
+          </a>
+        </div>
+      `).join('');
+
+      this.searchResults.innerHTML = html;
+    }
+
+    this.searchResults.classList.add('show');
+  }
+
+  highlightText(text, query) {
+    if (!query) return text;
+
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return text.replace(regex, '<mark>$1</mark>');
+  }
+
+  hideResults() {
+    this.searchResults.classList.remove('show');
+  }
+
+  handleKeydown(event) {
+    if (event.key === 'Escape') {
+      this.hideResults();
+      this.searchInput.blur();
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const firstResult = this.searchResults.querySelector('.search-result-link');
+      if (firstResult) {
+        firstResult.click();
+      }
+    }
+  }
+
+  handleClickOutside(event) {
+    if (!this.searchInput.contains(event.target) &&
+        !this.searchResults.contains(event.target) &&
+        !this.searchButton.contains(event.target)) {
+      this.hideResults();
+    }
+  }
+
+  debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+}
+
+// Initialize search when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+  new DocumentationSearch();
+});
+</script>
+
+<style>
+/* Search result styling */
+.search-result-item {
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.search-result-link {
+  display: block;
+  padding: 12px 16px;
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 0.2s ease;
+}
+
+.search-result-link:hover {
+  background-color: #f6f8fa;
+}
+
+.search-result-title {
+  font-weight: 600;
+  color: #24292e;
+  margin-bottom: 4px;
+  font-size: 16px;
+}
+
+.search-result-snippet {
+  color: #586069;
+  font-size: 14px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.search-result-type {
+  font-size: 12px;
+  color: #0366d6;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.search-result-snippet mark {
+  background-color: #fff3cd;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.search-result-title mark {
+  background-color: #fff3cd;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+/* Mobile search adjustments */
+@media (max-width: 768px) {
+  .search-container {
+    display: none; /* Hide search on mobile for better UX */
+  }
+
+  .search-results {
+    left: 16px;
+    right: 16px;
+  }
+}
+
+/* Dark mode support (if implemented) */
+@media (prefers-color-scheme: dark) {
+  .search-result-link:hover {
+    background-color: #161b22;
+  }
+
+  .search-result-title {
+    color: #f0f6fc;
+  }
+
+  .search-result-snippet {
+    color: #c9d1d9;
+  }
+
+  .search-result-snippet mark {
+    background-color: #bb8009;
+    color: #000;
+  }
+
+  .search-result-title mark {
+    background-color: #bb8009;
+    color: #000;
+  }
+}
+</style>

@@ -1,0 +1,198 @@
+<!-- RDNSx Newsletter Signup -->
+<div class="newsletter-signup">
+  <div class="newsletter-content">
+    <div class="newsletter-icon">📧</div>
+    <div class="newsletter-text">
+      <h3>Stay Updated with RDNSx</h3>
+      <p>Get the latest DNS security research, tool updates, and cybersecurity insights delivered to your inbox.</p>
+    </div>
+    <div class="newsletter-form">
+      <form action="https://rdnsx.us1.list-manage.com/subscribe/post?u=YOUR_LIST_ID&amp;id=YOUR_FORM_ID" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+        <div class="newsletter-fields">
+          <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="Enter your email address" required>
+          <input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button">
+        </div>
+        <div id="mce-responses" class="clear foot">
+          <div class="response" id="mce-error-response" style="display:none"></div>
+          <div class="response" id="mce-success-response" style="display:none"></div>
+        </div>
+        <div style="position: absolute; left: -5000px;" aria-hidden="true">
+          <input type="text" name="b_YOUR_LIST_ID_YOUR_FORM_ID" tabindex="-1" value="">
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="newsletter-benefits">
+    <div class="benefit">
+      <span class="benefit-icon">🔒</span>
+      <span class="benefit-text">Security Research Updates</span>
+    </div>
+    <div class="benefit">
+      <span class="benefit-icon">🚀</span>
+      <span class="benefit-text">New Feature Announcements</span>
+    </div>
+    <div class="benefit">
+      <span class="benefit-icon">📚</span>
+      <span class="benefit-text">DNS Analysis Tutorials</span>
+    </div>
+    <div class="benefit">
+      <span class="benefit-icon">🎯</span>
+      <span class="benefit-text">Exclusive Content</span>
+    </div>
+  </div>
+</div>
+
+<style>
+.newsletter-signup {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 2rem;
+  margin: 2rem 0;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+}
+
+.newsletter-content {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.5rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.newsletter-icon {
+  font-size: 2rem;
+  background: rgba(255, 255, 255, 0.2);
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.newsletter-text h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.newsletter-text p {
+  margin: 0;
+  opacity: 0.9;
+  font-size: 0.95rem;
+}
+
+.newsletter-form {
+  min-width: 300px;
+}
+
+.newsletter-fields {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.newsletter-fields input[type="email"] {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: white;
+  color: #333;
+}
+
+.newsletter-fields input[type="email"]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.newsletter-fields .button {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.newsletter-fields .button:hover {
+  background: #218838;
+}
+
+.newsletter-benefits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.benefit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.benefit-icon {
+  font-size: 1.2rem;
+}
+
+.benefit-text {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+@media (max-width: 768px) {
+  .newsletter-content {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .newsletter-fields {
+    flex-direction: column;
+  }
+
+  .newsletter-fields input[type="email"] {
+    margin-bottom: 0.5rem;
+  }
+
+  .newsletter-benefits {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<script>
+// Newsletter signup enhancement
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('mc-embedded-subscribe-form');
+  if (!form) return;
+
+  form.addEventListener('submit', function(e) {
+    // Track newsletter signup
+    if (typeof gtag !== 'undefined') {
+      gtag('event', 'newsletter_signup', {
+        event_category: 'engagement',
+        event_label: 'footer_form'
+      });
+    }
+
+    // Show loading state
+    const button = form.querySelector('.button');
+    const originalText = button.value;
+    button.value = 'Subscribing...';
+    button.disabled = true;
+
+    // Re-enable after 3 seconds (fallback)
+    setTimeout(function() {
+      button.value = originalText;
+      button.disabled = false;
+    }, 3000);
+  });
+});
+</script>

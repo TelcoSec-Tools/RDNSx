@@ -4,24 +4,295 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Primary Meta Tags -->
+  <title>{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}</title>
+  <meta name="title" content="{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}">
+  <meta name="description" content="{{ page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | truncate: 160 }}">
+  <meta name="keywords" content="{{ page.keywords | default: site.keywords | join: ', ' }}">
+  <meta name="author" content="{{ page.author | default: site.author }}">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+
+  <!-- Canonical URL -->
+  <link rel="canonical" href="{{ page.url | absolute_url }}">
+
+  <!-- Favicon and App Icons -->
+  <link rel="icon" type="image/x-icon" href="{{ '/assets/images/favicon.ico' | relative_url }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ '/assets/images/apple-touch-icon.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ '/assets/images/favicon-32x32.png' | relative_url }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ '/assets/images/favicon-16x16.png' | relative_url }}">
+
+  <!-- PWA Manifest - Uncomment when manifest.json is deployed -->
+  <!-- <link rel="manifest" href="{{ '/manifest.json' | absolute_url }}"> -->
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ page.url | absolute_url }}">
+  <meta property="og:title" content="{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}">
+  <meta property="og:description" content="{{ page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | truncate: 160 }}">
+  <meta property="og:image" content="{{ page.og_image | default: site.og_image | absolute_url }}">
+  <meta property="og:site_name" content="{{ site.seo.site_name | default: site.title }}">
+  <meta property="og:locale" content="{{ site.locale | default: 'en_US' }}">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="{{ site.twitter.card | default: 'summary_large_image' }}">
+  <meta property="twitter:url" content="{{ page.url | absolute_url }}">
+  <meta property="twitter:title" content="{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}">
+  <meta property="twitter:description" content="{{ page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | truncate: 160 }}">
+  <meta property="twitter:image" content="{{ page.og_image | default: site.og_image | absolute_url }}">
+  {% if site.twitter.username -%}
+  <meta property="twitter:site" content="{{ site.twitter.username }}">
+  <meta property="twitter:creator" content="{{ site.twitter.username }}">
+  {%- endif %}
+
+  <!-- Additional Meta Tags -->
+  <meta name="theme-color" content="#2f363d">
+  <meta name="msapplication-TileColor" content="#2f363d">
+  <meta name="application-name" content="{{ site.title }}">
+  <meta name="geo.region" content="US">
+  <meta name="geo.placename" content="Global">
+  <meta name="distribution" content="global">
+  <meta name="rating" content="general">
+  <meta name="revisit-after" content="7 days">
+  <meta name="category" content="Technology">
+  <meta name="coverage" content="Worldwide">
+  <meta name="target" content="developers, security researchers, network administrators">
+
+  <!-- Security Headers -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://www.google-analytics.com;">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+
+  <!-- Preload critical resources -->
+  <link rel="preload" href="{{ '/assets/images/logo.svg' | relative_url }}" as="image" type="image/svg+xml">
+  <link rel="dns-prefetch" href="//github.com">
+  <link rel="dns-prefetch" href="//fonts.googleapis.com">
+  <link rel="dns-prefetch" href="//fonts.gstatic.com">
+
+  <!-- Structured Data - JSON-LD -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "{{ site.url }}/#website",
+        "url": "{{ site.url }}",
+        "name": "{{ site.title }}",
+        "description": "{{ site.description }}",
+        "publisher": {
+          "@id": "{{ site.url }}/#organization"
+        },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "{{ site.url }}/search?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        },
+        "inLanguage": "{{ site.lang | default: 'en-US' }}",
+        "copyrightHolder": {
+          "@id": "{{ site.url }}/#organization"
+        },
+        "license": "https://opensource.org/licenses/MIT"
+      },
+      {
+        "@type": "Organization",
+        "@id": "{{ site.url }}/#organization",
+        "name": "{{ site.social.name | default: site.author }}",
+        "url": "{{ site.url }}",
+        "logo": {
+          "@type": "ImageObject",
+          "inLanguage": "{{ site.lang | default: 'en-US' }}",
+          "@id": "{{ site.url }}/#logo",
+          "url": "{{ site.logo | absolute_url }}",
+          "contentUrl": "{{ site.logo | absolute_url }}",
+          "width": 512,
+          "height": 512,
+          "caption": "{{ site.social.name | default: site.author }}"
+        },
+        "image": {
+          "@id": "{{ site.url }}/#logo"
+        },
+        "foundingDate": "2024",
+        "sameAs": {{ site.social.links | jsonify }},
+        "contactPoint": {
+          "@type": "ContactPoint",
+          "contactType": "technical support",
+          "url": "https://github.com/TelcoSec-Tools/RDNSx/issues"
+        }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "{{ site.url }}/#softwareapplication",
+        "name": "{{ site.software.name }}",
+        "description": "{{ site.software.description }}",
+        "url": "{{ site.repository | prepend: 'https://github.com/' }}",
+        "applicationCategory": "{{ site.software.application_category }}",
+        "operatingSystem": "{{ site.software.operating_system }}",
+        "programmingLanguage": "{{ site.software.programming_language }}",
+        "softwareVersion": "{{ site.software.version }}",
+        "author": {
+          "@id": "{{ site.url }}/#organization"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "{{ site.software.offers.price }}",
+          "priceCurrency": "{{ site.software.offers.price_currency }}"
+        },
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": "{{ site.software.aggregate_rating.rating_value }}",
+          "reviewCount": "{{ site.software.aggregate_rating.review_count }}"
+        },
+        "featureList": [
+          "DNS Record Enumeration",
+          "ASN Information Lookup",
+          "Reverse DNS (PTR) Queries",
+          "Subdomain Bruteforce",
+          "DNSSEC Analysis",
+          "CDN Detection",
+          "Email Security Analysis",
+          "Database Export Support",
+          "High Performance Async Processing",
+          "Cross-platform Support",
+          "Docker Containerization"
+        ],
+        "applicationSubCategory": "Security Tools",
+        "fileSize": "50MB",
+        "downloadUrl": "https://github.com/TelcoSec-Tools/RDNSx/releases",
+        "softwareRequirements": "Rust 1.70+",
+        "softwareHelp": {
+          "@type": "CreativeWork",
+          "url": "{{ site.url }}/guide/quick-start"
+        },
+        "screenshot": {
+          "@type": "ImageObject",
+          "url": "{{ site.logo | absolute_url }}"
+        }
+      },
+      {
+        "@type": "TechArticle",
+        "@id": "{{ page.url | absolute_url }}",
+        "url": "{{ page.url | absolute_url }}",
+        "name": "{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}",
+        "description": "{{ page.description | default: page.excerpt | default: site.description | strip_html | normalize_whitespace | truncate: 160 }}",
+        "isPartOf": {
+          "@id": "{{ site.url }}/#website"
+        },
+        "about": {
+          "@id": "{{ site.url }}/#organization"
+        },
+        "primaryImageOfPage": {
+          "@type": "ImageObject",
+          "@id": "{{ page.og_image | default: site.og_image | absolute_url }}"
+        },
+        "datePublished": "{{ page.date | date_to_xmlschema }}",
+        "dateModified": "{{ page.last_modified_at | date_to_xmlschema | default: page.date | date_to_xmlschema }}",
+        "inLanguage": "{{ page.lang | default: site.lang | default: 'en-US' }}",
+        "potentialAction": [
+          {
+            "@type": "ReadAction",
+            "target": ["{{ page.url | absolute_url }}"]
+          }
+        ],
+        "articleSection": "Documentation",
+        "programmingLanguage": "Rust",
+        "teaches": "DNS Analysis, Network Security, Command Line Tools"
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "{{ site.url }}/faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is RDNSx?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "RDNSx is a high-performance DNS toolkit written in Rust for security researchers, network administrators, and developers. It provides comprehensive DNS enumeration, ASN analysis, and reverse DNS lookup functionality."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How fast is RDNSx?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "RDNSx delivers exceptional performance with async processing, achieving DNS query response times under 5ms and bulk resolution of 1000 domains in under 30 seconds."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What DNS record types does RDNSx support?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "RDNSx supports all 27 major DNS record types including A, AAAA, CNAME, MX, TXT, NS, SOA, PTR, SRV, CAA, DNSKEY, DS, RRSIG, NSEC, and many more."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is RDNSx suitable for production use?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, RDNSx is production-ready with enterprise features including Docker support, database exports to Elasticsearch/MongoDB/Cassandra, and comprehensive configuration options."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <!-- Jekyll SEO Plugin -->
   {%- seo -%}
-  <link rel="stylesheet" href="{{ "/assets/css/style.css?v=" | append: site.github.build_revision | relative_url }}">
+
+  <!-- Performance Optimizations -->
+  {%- include performance.html -%}
+
+  <!-- SEO Enhancements -->
+  {%- include seo-enhancements.html -%}
+
+  <!-- Custom Styles -->
+  {%- include custom-styles.html -%}
+
+  <!-- Fallback Stylesheet -->
+  <!-- Theme CSS is loaded automatically by GitHub Pages -->
+
+  <!-- RSS Feed -->
   {%- feed_meta -%}
-  {%- if jekyll.environment == 'production' and site.google_analytics -%}
-    {%- include google-analytics.html -%}
-  {%- endif -%}
 </head>
 <body>
   {%- include header.html -%}
 
   <div class="container-lg px-3 my-5 markdown-body">
+    {% unless page.layout == 'home' %}
+      {% include breadcrumbs.html %}
+    {% endunless %}
+
     {{ content }}
   </div>
 
   {%- include footer.html -%}
 
   {%- if jekyll.environment == 'production' -%}
-    <script src="{{ '/assets/js/scale.fix.js' | relative_url }}"></script>
+    <!-- Service Worker Registration - Uncomment when sw.js is deployed -->
+    <!--
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('{{ "/sw.js" | absolute_url }}')
+            .then(function(registration) {
+              console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            }, function(err) {
+              console.log('ServiceWorker registration failed: ', err);
+            });
+        });
+      }
+    </script>
+    -->
+    <!-- Image Optimization -->
+    {%- include image-optimizer.html -%}
+    <!-- Search Functionality -->
+    {%- include search.html -%}
   {%- endif -%}
 </body>
 </html>

@@ -1,8 +1,8 @@
 //! Configuration types and file handling
 
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::error::{DnsxError, Result};
@@ -53,7 +53,7 @@ impl Default for DnsxOptions {
 }
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     /// DNS resolver configuration
     #[serde(default)]
@@ -66,16 +66,6 @@ pub struct Config {
     /// Export configuration
     #[serde(default)]
     pub export: ExportConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            resolvers: ResolverConfig::default(),
-            performance: PerformanceConfig::default(),
-            export: ExportConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,29 +298,93 @@ fn default_cassandra_table() -> String {
 impl Config {
     /// Load configuration from a TOML file
     pub fn from_file(path: &Path) -> Result<Self> {
-        let contents = fs::read_to_string(path)
-            .map_err(|e| DnsxError::Other(format!("Failed to read config file {}: {}", path.display(), e)))?;
+        let contents = fs::read_to_string(path).map_err(|e| {
+            DnsxError::Other(format!(
+                "Failed to read config file {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
 
-        let config: Config = toml::from_str(&contents)
-            .map_err(|e| DnsxError::Other(format!("Failed to parse config file {}: {}", path.display(), e)))?;
+        let config: Config = toml::from_str(&contents).map_err(|e| {
+            DnsxError::Other(format!(
+                "Failed to parse config file {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
 
         Ok(config)
     }
 
     /// Load configuration with fallback to defaults
     pub fn load_with_fallback(config_path: Option<&Path>) -> Result<Self> {
-        match config_path {
-            Some(path) => {
-                match Self::from_file(path) {
-                    Ok(config) => Ok(config),
-                    Err(e) => {
-                        eprintln!("Warning: Failed to load config file {}: {}", path.display(), e);
-                        eprintln!("Using default configuration");
-                        Ok(Self::default())
-                    }
-                }
-            }
-            None => Ok(Self::default()),
+        // An explicitly requested config file must load: silently falling back to
+        // defaults would run with different resolvers and limits than intended.
+        let env_path = std::env::var("RDNSX_CONFIG").ok().filter(|p| !p.is_empty());
+        let path = config_path
+            .map(Path::to_path_buf)
+            .or_else(|| env_path.map(Into::into));
+        let mut config = match path {
+            Some(path) => Self::from_file(&path)?,
+            None => Self::default(),
+        };
+        config.apply_env_overrides();
+        Ok(config)
+    }
+
+    /// Apply settings from `RDNSX_*` environment variables (see the configuration
+    /// guide). Environment values override the file; CLI flags override both.
+    /// Credentials can be supplied this way instead of being stored in TOML.
+    pub fn apply_env_overrides(&mut self) {
+        self.apply_overrides_from(|name| std::env::var(name).ok());
+    }
+
+    fn apply_overrides_from(&mut self, get: impl Fn(&str) -> Option<String>) {
+        let var = |name: &str| {
+            get(name)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let list = |v: String| -> Vec<String> {
+            v.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+
+        if let Some(v) = var("RDNSX_RESOLVERS") {
+            self.resolvers.servers = list(v);
+        }
+        if let Some(v) = var("RDNSX_TIMEOUT").and_then(|v| v.parse().ok()) {
+            self.resolvers.timeout = v;
+        }
+        if let Some(v) = var("RDNSX_RETRIES").and_then(|v| v.parse().ok()) {
+            self.resolvers.retries = v;
+        }
+        if let Some(v) = var("RDNSX_THREADS").and_then(|v| v.parse().ok()) {
+            self.performance.threads = v;
+        }
+        if let Some(v) = var("RDNSX_RATE_LIMIT").and_then(|v| v.parse().ok()) {
+            self.performance.rate_limit = v;
+        }
+        if let Some(v) = var("RDNSX_ES_URL") {
+            self.export.elasticsearch.url = v;
+        }
+        if let Some(v) = var("RDNSX_ES_INDEX") {
+            self.export.elasticsearch.index = v;
+        }
+        if let Some(v) = var("RDNSX_MONGODB_URL") {
+            self.export.mongodb.url = v;
+        }
+        if let Some(v) = var("RDNSX_CASSANDRA_CONTACT_POINTS") {
+            self.export.cassandra.contact_points = list(v);
+        }
+        if let Some(v) = var("RDNSX_CASSANDRA_USERNAME") {
+            self.export.cassandra.username = v;
+        }
+        if let Some(v) = var("RDNSX_CASSANDRA_PASSWORD") {
+            self.export.cassandra.password = v;
         }
     }
 
@@ -376,6 +430,7 @@ database = "dnsx"
 collection = "records"
 
 [export.cassandra]
+# Credentials can also come from RDNSX_CASSANDRA_USERNAME / RDNSX_CASSANDRA_PASSWORD
 # Enable Cassandra export
 enabled = false
 # Cassandra contact points (host:port)
@@ -395,5 +450,34 @@ table = "records"
         println!("Created example configuration file: {}", path.display());
         println!("Edit this file to customize RDNSx settings");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod env_override_tests {
+    use super::*;
+
+    #[test]
+    fn env_values_override_file_values() {
+        let mut config = Config::default();
+        let env = |name: &str| match name {
+            "RDNSX_RESOLVERS" => Some("9.9.9.9, 1.1.1.1".to_string()),
+            "RDNSX_TIMEOUT" => Some("9".to_string()),
+            "RDNSX_RATE_LIMIT" => Some("250".to_string()),
+            "RDNSX_CASSANDRA_PASSWORD" => Some("s3cret".to_string()),
+            "RDNSX_THREADS" => Some("not-a-number".to_string()),
+            _ => None,
+        };
+        let threads_before = config.performance.threads;
+        config.apply_overrides_from(env);
+
+        assert_eq!(config.resolvers.servers, vec!["9.9.9.9", "1.1.1.1"]);
+        assert_eq!(config.resolvers.timeout, 9);
+        assert_eq!(config.performance.rate_limit, 250);
+        assert_eq!(config.export.cassandra.password, "s3cret");
+        assert_eq!(
+            config.performance.threads, threads_before,
+            "invalid values are ignored"
+        );
     }
 }

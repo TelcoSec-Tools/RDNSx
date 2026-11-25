@@ -1,0 +1,162 @@
+# Robots.txt for RDNSx Documentation
+# https://rdnsx.telcosec.net/robots.txt
+
+# Default policy - Allow all crawlers
+User-agent: *
+Allow: /
+
+# Major Search Engine Bots
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 2
+
+User-agent: DuckDuckBot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Baiduspider
+Allow: /
+Crawl-delay: 5
+
+User-agent: YandexBot
+Allow: /
+Crawl-delay: 2
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: LinkedInBot
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+# AI and Machine Learning Crawlers
+User-agent: GPTBot
+Allow: /
+Crawl-delay: 1
+
+User-agent: ChatGPT-User
+Allow: /
+Crawl-delay: 1
+
+User-agent: ClaudeBot
+Allow: /
+Crawl-delay: 1
+
+User-agent: anthropic-ai
+Allow: /
+Crawl-delay: 1
+
+User-agent: CCBot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Google-Extended
+Allow: /
+Crawl-delay: 1
+
+User-agent: OAI-Search
+Allow: /
+Crawl-delay: 1
+
+User-agent: PerplexityBot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Bytespider
+Allow: /
+Crawl-delay: 2
+
+# Research and Academic Crawlers
+User-agent: archive.org_bot
+Allow: /
+Crawl-delay: 5
+
+User-agent: ia_archiver
+Allow: /
+Crawl-delay: 5
+
+# Mobile and Specialty Crawlers
+User-agent: Googlebot-Mobile
+Allow: /
+
+User-agent: Googlebot-Image
+Allow: /
+
+User-agent: Googlebot-News
+Allow: /
+
+# Development and Testing Bots
+User-agent:rogerbot
+Allow: /
+
+User-agent: exabot
+Allow: /
+
+User-agent: MJ12bot
+Allow: /
+
+# Block unwanted crawlers
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+# Development and internal paths
+Disallow: /.bundle/
+Disallow: /.sass-cache/
+Disallow: /.jekyll-cache/
+Disallow: /vendor/
+Disallow: /admin/
+Disallow: /_site/
+
+# Allow access to assets
+Allow: /assets/
+Allow: /feed.xml
+Allow: /sitemap.xml
+
+# Sitemap locations
+Sitemap: https://rdnsx.telcosec.net/sitemap.xml
+
+# Additional sitemaps for better crawling
+Sitemap: https://rdnsx.telcosec.net/feed.xml
+
+# Host directive (for multi-domain sites)
+Host: https://rdnsx.telcosec.net
+
+# Crawl delay for different bot types (seconds)
+Crawl-delay: 1
+
+# Allow access to important resources
+Allow: /assets/
+Allow: /feed.xml
+Allow: /sitemap.xml
+Allow: /guide/
+Allow: /api/
+
+# Disallow development and temporary files
+Disallow: /.bundle/
+Disallow: /.sass-cache/
+Disallow: /.jekyll-cache/
+Disallow: /vendor/
+Disallow: /admin/
+Disallow: /_site/
+Disallow: /*.json$
+Disallow: /*.md$
+Disallow: /*.yml$
+Disallow: /*.yaml$
+Disallow: /.git/
+Disallow: /.github/

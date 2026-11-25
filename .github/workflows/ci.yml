@@ -20,13 +20,15 @@ jobs:
       should-run-full: ${{ steps.check.outputs.should-run-full }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Check for relevant changes
       id: check
       run: |
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           # Check if any Rust files or workflows changed
-          if git diff --name-only HEAD~1 | grep -E '\.(rs|toml)$|^.github/workflows/'; then
+          if git diff --name-only "origin/${{ github.base_ref }}"...HEAD | grep -E '\.(rs|toml)$|^.github/workflows/'; then
             echo "should-run-full=true" >> $GITHUB_OUTPUT
           else
             echo "should-run-full=false" >> $GITHUB_OUTPUT
@@ -66,7 +68,10 @@ jobs:
       run: cargo fmt --all -- --check
 
     - name: Check linting
-      run: cargo clippy -- -D warnings --allow deprecated --allow clippy::type_complexity
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+    - name: Check build without database exporters
+      run: cargo check -p rdnsx --no-default-features
 
     - name: Check for unused dependencies
       run: |
@@ -99,8 +104,10 @@ jobs:
       with:
         key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
 
+    # Unit tests and the mock-DNS integration tests run offline; tests marked
+    # #[ignore] need public DNS and are included here.
     - name: Run tests (with coverage)
-      run: cargo test --verbose -- --nocapture
+      run: cargo test --workspace --verbose -- --include-ignored
       env:
         LLVM_PROFILE_FILE: target/profraw/coverage-%p-%m.profraw
 
@@ -179,9 +186,9 @@ jobs:
             name: windows-x86_64
             runner: windows-2022
           - os: macos-latest
-            target: x86_64-apple-darwin
-            name: macos-x86_64
-            runner: macos-12
+            target: aarch64-apple-darwin
+            name: macos-aarch64
+            runner: macos-latest
     steps:
     - uses: actions/checkout@v4
 
@@ -343,7 +350,9 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
+        file: docker/Dockerfile
         push: false
+        load: true
         tags: rdnsx-test:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -362,4 +371,4 @@ jobs:
     - name: Build multi-arch image (dry run)
       run: |
         echo "Testing multi-arch build capability..."
-        docker buildx build --platform linux/amd64,linux/arm64 -t rdnsx-multi:test --load . || echo "Multi-arch test completed (may fail in CI without QEMU)"
+        docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t rdnsx-multi:test . || echo "Multi-arch test completed (may fail in CI without QEMU)"

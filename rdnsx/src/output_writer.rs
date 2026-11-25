@@ -2,44 +2,65 @@
 
 use anyhow::Result;
 use rdnsx_core::DnsRecord;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 
 pub struct OutputWriter {
-    writer: Box<dyn Write>,
+    writer: BufWriter<Box<dyn Write>>,
     json_output: bool,
     silent: bool,
 }
 
 impl OutputWriter {
     pub fn new(output_file: Option<String>, json_output: bool, silent: bool) -> Result<Self> {
-        let writer: Box<dyn Write> = if let Some(file) = output_file {
+        let raw_writer: Box<dyn Write> = if let Some(file) = output_file {
             Box::new(std::fs::File::create(file)?)
         } else {
             Box::new(io::stdout())
         };
 
         Ok(Self {
-            writer,
+            writer: BufWriter::new(raw_writer),
             json_output,
             silent,
         })
     }
 
+    pub fn is_json(&self) -> bool {
+        self.json_output
+    }
+
+    #[allow(dead_code)]
+    pub fn is_silent(&self) -> bool {
+        self.silent
+    }
+
     pub fn write_record(&mut self, record: &DnsRecord, resp_only: bool) -> Result<()> {
-        if self.silent {
-            return Ok(());
+        // Results are always written; --silent only hides the banner and
+        // progress messages on stderr, so `rdnsx --silent ... | grep` works.
+        if resp_only {
+            if record.is_negative() {
+                writeln!(self.writer, "{}", record.response_code)?;
+            } else {
+                writeln!(self.writer, "{}", record.value)?;
+            }
+        } else if self.json_output {
+            let json = serde_json::to_string(record)?;
+            writeln!(self.writer, "{}", json)?;
+        } else {
+            writeln!(self.writer, "{}", record)?;
         }
 
-        let output = if resp_only {
-            record.value.to_string()
-        } else if self.json_output {
-            serde_json::to_string(record)?
-        } else {
-            format!("{}\n", record)
-        };
+        Ok(())
+    }
 
-        write!(self.writer, "{}", output)?;
-        self.writer.flush()?;
+    pub fn write_json<T: serde::Serialize>(&mut self, value: &T) -> Result<()> {
+        let json = serde_json::to_string_pretty(value)?;
+        writeln!(self.writer, "{}", json)?;
+        Ok(())
+    }
+
+    pub fn write_line(&mut self, line: &str) -> Result<()> {
+        writeln!(self.writer, "{}", line)?;
         Ok(())
     }
 

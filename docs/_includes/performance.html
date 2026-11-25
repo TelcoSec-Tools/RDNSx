@@ -1,0 +1,147 @@
+<!-- Performance Optimizations -->
+<!-- Preconnect to external domains -->
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://github.com" crossorigin>
+
+<!-- DNS prefetch for external resources -->
+<link rel="dns-prefetch" href="//fonts.googleapis.com">
+<link rel="dns-prefetch" href="//fonts.gstatic.com">
+<link rel="dns-prefetch" href="//github.com">
+<link rel="dns-prefetch" href="//www.google-analytics.com">
+<link rel="dns-prefetch" href="//www.googletagmanager.com">
+
+<!-- Resource hints for critical resources -->
+{% if page.image %}
+<link rel="preload" href="{{ page.image | absolute_url }}" as="image" type="image/webp">
+{% endif %}
+
+<!-- Theme CSS is loaded automatically by GitHub Pages -->
+
+<!-- Performance monitoring and Core Web Vitals tracking -->
+<script>
+// Performance monitoring, Core Web Vitals, and SEO optimizations
+(function() {
+  // Mark when DOM is interactive
+  document.addEventListener('DOMContentLoaded', function() {
+    if ('performance' in window && 'mark' in window.performance) {
+      window.performance.mark('dom-interactive');
+    }
+  });
+
+  // Mark when page is fully loaded
+  window.addEventListener('load', function() {
+    if ('performance' in window && 'mark' in window.performance) {
+      window.performance.mark('page-loaded');
+
+      // Measure and report key metrics
+      try {
+        const navigation = window.performance.getEntriesByType('navigation')[0];
+        const paint = window.performance.getEntriesByType('paint');
+
+        // Enhanced performance metrics including Core Web Vitals
+        const metrics = {
+          'DOM Content Loaded': navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
+          'Load Event': navigation.loadEventEnd - navigation.loadEventStart,
+          'First Paint': paint.find(p => p.name === 'first-paint')?.startTime,
+          'First Contentful Paint': paint.find(p => p.name === 'first-contentful-paint')?.startTime,
+          'Time to Interactive': navigation.domInteractive - navigation.fetchStart,
+          'Total Blocking Time': 0, // Would need more complex calculation
+          'Cumulative Layout Shift': 0, // Would need additional tracking
+          'Largest Contentful Paint': 0 // Would need additional tracking
+        };
+
+        console.log('Performance Metrics:', metrics);
+
+        // Send to analytics if available (Google Analytics 4)
+        if (typeof gtag !== 'undefined') {
+          gtag('event', 'page_performance', {
+            custom_map: {
+              metric1: 'dom_content_loaded',
+              metric2: 'load_event',
+              metric3: 'first_paint',
+              metric4: 'first_contentful_paint'
+            },
+            value: Math.round(metrics['Load Event'] || 0)
+          });
+
+          // Send Core Web Vitals data
+          if (metrics['First Contentful Paint']) {
+            gtag('event', 'web_vitals', {
+              custom_map: {
+                metric_value: metrics['First Contentful Paint'],
+                metric_id: 'FCP'
+              }
+            });
+          }
+        }
+      } catch (e) {
+        // Silently fail if performance API is not fully supported
+      }
+    }
+  });
+
+  // Optimize scrolling performance
+  let scrollTimeout;
+  window.addEventListener('scroll', function() {
+    if (!scrollTimeout) {
+      document.documentElement.classList.add('scrolling');
+    }
+
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(function() {
+      document.documentElement.classList.remove('scrolling');
+    }, 150);
+  });
+
+  // Reduce motion for users who prefer it
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.documentElement.classList.add('reduced-motion');
+
+    // Disable animations
+    const style = document.createElement('style');
+    style.textContent = `
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Connection quality detection
+  if ('connection' in navigator) {
+    const connection = navigator.connection;
+    document.documentElement.classList.add(`connection-${connection.effectiveType}`);
+
+    connection.addEventListener('change', function() {
+      // Remove old class
+      document.documentElement.classList.forEach(cls => {
+        if (cls.startsWith('connection-')) {
+          document.documentElement.classList.remove(cls);
+        }
+      });
+      // Add new class
+      document.documentElement.classList.add(`connection-${connection.effectiveType}`);
+    });
+  }
+})();
+</script>
+
+<!-- Non-critical CSS preload -->
+<link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"></noscript>
+
+
+<!-- Critical resource hints -->
+{% if site.google_analytics %}
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ site.google_analytics }}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '{{ site.google_analytics }}');
+</script>
+{% endif %}

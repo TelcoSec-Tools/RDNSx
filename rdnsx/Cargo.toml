@@ -2,6 +2,7 @@
 name = "rdnsx"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -13,6 +14,12 @@ default-run = "rdnsx"
 [[bin]]
 name = "rdnsx"
 path = "src/main.rs"
+
+[features]
+default = ["export-elasticsearch", "export-mongodb", "export-cassandra"]
+export-elasticsearch = ["rdnsx-core/elasticsearch"]
+export-mongodb = ["rdnsx-core/mongodb"]
+export-cassandra = ["rdnsx-core/cassandra"]
 
 [dependencies]
 # Core library
