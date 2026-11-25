@@ -5,7 +5,7 @@ description: "Complete installation guide for RDNSx DNS toolkit. Install on Wind
 keywords: "RDNSx installation, setup guide, Rust installation, Docker setup, Windows install, Linux install, macOS install"
 og_image: /assets/images/logo.svg
 twitter_card: summary_large_image
-author: "Quinas Project"
+author: "TelcoSec"
 lang: en-US
 permalink: /guide/installation/
 priority: 0.9
@@ -16,14 +16,14 @@ changefreq: monthly
 
 ## Prerequisites
 
-- Rust 1.70.0 or later
+- Rust 1.94 or later
 - Cargo package manager
 
 ## From Source (Recommended)
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/Quinas-Project/RDNSx.git
+git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx
 ```
 
@@ -41,12 +41,12 @@ The binary will be available at `target/release/rdnsx`
 
 ## Pre-built Binaries
 
-Download pre-built binaries for your platform from the [releases page](https://github.com/Quinas-Project/RDNSx/releases).
+Download pre-built binaries for your platform from the [releases page](https://github.com/TelcoSec-Tools/RDNSx/releases).
 
 ### Linux/macOS
 ```bash
 # Download and extract
-wget https://github.com/Quinas-Project/RDNSx/releases/download/v0.1.0/rdnsx-linux-x86_64.tar.gz
+wget https://github.com/TelcoSec-Tools/RDNSx/releases/download/v0.1.0/rdnsx-linux-x86_64.tar.gz
 tar -xzf rdnsx-linux-x86_64.tar.gz
 sudo mv rdnsx /usr/local/bin/
 ```
@@ -58,8 +58,8 @@ Download `rdnsx-windows-x86_64.zip` and extract the `rdnsx.exe` file to a direct
 
 ### Using Docker Hub
 ```bash
-docker pull quinas/rdnsx:latest
-docker run --rm quinas/rdnsx --help
+docker pull telcosec/rdnsx:latest
+docker run --rm telcosec/rdnsx --help
 ```
 
 ### Building from source
@@ -76,7 +76,7 @@ For more complex setups with database exports:
 version: '3.8'
 services:
   rdnsx:
-    image: quinas/rdnsx:latest
+    image: telcosec/rdnsx:latest
     volumes:
       - ./config:/app/config
       - ./output:/app/output
@@ -103,7 +103,7 @@ You should see the RDNSx banner and available commands.
 ## Troubleshooting
 
 ### Build fails
-Ensure you have Rust 1.70.0+ installed:
+Ensure you have Rust 1.94+ installed:
 ```bash
 rustc --version
 cargo --version

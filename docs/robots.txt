@@ -1,5 +1,5 @@
 # Robots.txt for RDNSx Documentation
-# https://rdnsx.quinas.cloud/robots.txt
+# https://rdnsx.telcosec.net/robots.txt
 
 # Default policy - Allow all crawlers
 User-agent: *
@@ -129,13 +129,13 @@ Allow: /feed.xml
 Allow: /sitemap.xml
 
 # Sitemap locations
-Sitemap: https://rdnsx.quinas.cloud/sitemap.xml
+Sitemap: https://rdnsx.telcosec.net/sitemap.xml
 
 # Additional sitemaps for better crawling
-Sitemap: https://rdnsx.quinas.cloud/feed.xml
+Sitemap: https://rdnsx.telcosec.net/feed.xml
 
 # Host directive (for multi-domain sites)
-Host: https://rdnsx.quinas.cloud
+Host: https://rdnsx.telcosec.net
 
 # Crawl delay for different bot types (seconds)
 Crawl-delay: 1

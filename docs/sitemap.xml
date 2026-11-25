@@ -11,12 +11,12 @@ layout: null
 
   <!-- Homepage -->
   <url>
-    <loc>https://rdnsx.quinas.cloud/</loc>
+    <loc>https://rdnsx.telcosec.net/</loc>
     <lastmod>{{ site.time | date_to_xmlschema }}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <image:image>
-      <image:loc>https://rdnsx.quinas.cloud/assets/images/logo.svg</image:loc>
+      <image:loc>https://rdnsx.telcosec.net/assets/images/logo.svg</image:loc>
       <image:title>RDNSx Documentation</image:title>
       <image:caption>Fast and multi-purpose DNS toolkit written in Rust</image:caption>
     </image:image>
@@ -26,13 +26,13 @@ layout: null
   {% for page in site.pages %}
     {% if page.url contains '/guide/' %}
       <url>
-        <loc>https://rdnsx.quinas.cloud{{ page.url }}</loc>
+        <loc>https://rdnsx.telcosec.net{{ page.url }}</loc>
         <lastmod>{{ page.last_modified_at | default: page.date | date_to_xmlschema }}</lastmod>
         <changefreq>{{ page.changefreq | default: 'monthly' }}</changefreq>
         <priority>{{ page.priority | default: '0.8' }}</priority>
         {% if page.image %}
           <image:image>
-            <image:loc>https://rdnsx.quinas.cloud{{ page.image }}</image:loc>
+            <image:loc>https://rdnsx.telcosec.net{{ page.image }}</image:loc>
             <image:title>{{ page.title }}</image:title>
             <image:caption>{{ page.description | default: page.excerpt }}</image:caption>
           </image:image>
@@ -45,7 +45,7 @@ layout: null
   {% for page in site.pages %}
     {% if page.url contains '/api/' %}
       <url>
-        <loc>https://rdnsx.quinas.cloud{{ page.url }}</loc>
+        <loc>https://rdnsx.telcosec.net{{ page.url }}</loc>
         <lastmod>{{ page.last_modified_at | default: page.date | date_to_xmlschema }}</lastmod>
         <changefreq>{{ page.changefreq | default: 'monthly' }}</changefreq>
         <priority>{{ page.priority | default: '0.7' }}</priority>
@@ -55,7 +55,7 @@ layout: null
 
   <!-- Feed and Assets -->
   <url>
-    <loc>https://rdnsx.quinas.cloud/feed.xml</loc>
+    <loc>https://rdnsx.telcosec.net/feed.xml</loc>
     <lastmod>{{ site.time | date_to_xmlschema }}</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.3</priority>
@@ -63,7 +63,7 @@ layout: null
 
   <!-- Assets for SEO -->
   <url>
-    <loc>https://rdnsx.quinas.cloud/assets/images/logo.svg</loc>
+    <loc>https://rdnsx.telcosec.net/assets/images/logo.svg</loc>
     <lastmod>{{ site.time | date_to_xmlschema }}</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.1</priority>

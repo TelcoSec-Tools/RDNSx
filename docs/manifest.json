@@ -65,7 +65,7 @@
   "related_applications": [
     {
       "platform": "webapp",
-      "url": "https://rdnsx.quinas.cloud/manifest.json"
+      "url": "https://rdnsx.telcosec.net/manifest.json"
     }
   ],
   "prefer_related_applications": false

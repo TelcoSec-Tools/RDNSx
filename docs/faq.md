@@ -55,7 +55,7 @@ RDNSx stands out with:
 cargo install rdnsx
 
 # Or build from source
-git clone https://github.com/Quinas-Project/RDNSx.git
+git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx && cargo build --release
 ```
 
@@ -63,7 +63,7 @@ cd RDNSx && cargo build --release
 **Yes!** RDNSx supports Windows, Linux, and macOS. Use the same installation commands - Rust's Cargo handles platform-specific compilation automatically.
 
 ### Do I need Rust installed to use RDNSx?
-**Only for source installation**. Pre-built binaries are available for download, but if you're building from source or installing via `cargo install`, you'll need Rust 1.70+.
+**Only for source installation**. Pre-built binaries are available for download, but if you're building from source or installing via `cargo install`, you'll need Rust 1.94+.
 
 ### How do I verify RDNSx installation?
 ```bash
@@ -226,14 +226,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### How do I use RDNSx with Docker?
 ```bash
 # Pull the official image
-docker pull quinas/rdnsx:latest
+docker pull telcosec/rdnsx:latest
 
 # Run basic queries
-docker run --rm quinas/rdnsx query example.com
+docker run --rm telcosec/rdnsx query example.com
 
 # Mount config volume
 docker run --rm -v $(pwd)/config:/app/config \
-  quinas/rdnsx --config /app/config/rdnsx.toml query example.com
+  telcosec/rdnsx --config /app/config/rdnsx.toml query example.com
 ```
 
 ---
@@ -267,9 +267,9 @@ RDNSx includes built-in performance tracking:
 ## 📞 Getting Help
 
 ### Where can I get support?
-- **GitHub Issues**: [Report bugs and request features](https://github.com/Quinas-Project/RDNSx/issues)
-- **Discussions**: [Ask questions and share knowledge](https://github.com/Quinas-Project/RDNSx/discussions)
-- **Documentation**: [Complete guides and tutorials](https://rdnsx.quinas.cloud/)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/TelcoSec-Tools/RDNSx/issues)
+- **Discussions**: [Ask questions and share knowledge](https://github.com/TelcoSec-Tools/RDNSx/discussions)
+- **Documentation**: [Complete guides and tutorials](https://rdnsx.telcosec.net/)
 
 ### How do I contribute to RDNSx?
 **We welcome contributions!**
@@ -304,7 +304,7 @@ RDNSx includes built-in performance tracking:
 
 ### How do I stay updated?
 - **Watch** the GitHub repository for releases
-- **Follow** [@QuinasProject](https://twitter.com/QuinasProject) on Twitter
+- **Follow** [@TelcoSec](https://twitter.com/TelcoSec) on Twitter
 - **Subscribe** to our newsletter (coming soon!)
 - **Star** the repository to show support
 
@@ -312,7 +312,7 @@ RDNSx includes built-in performance tracking:
 
 <div class="faq-feedback">
   <h3>💬 Didn't find what you're looking for?</h3>
-  <p><a href="https://github.com/Quinas-Project/RDNSx/discussions">Ask the community</a> or <a href="https://github.com/Quinas-Project/RDNSx/issues/new">open an issue</a> for help!</p>
+  <p><a href="https://github.com/TelcoSec-Tools/RDNSx/discussions">Ask the community</a> or <a href="https://github.com/TelcoSec-Tools/RDNSx/issues/new">open an issue</a> for help!</p>
 </div>
 
 <style>

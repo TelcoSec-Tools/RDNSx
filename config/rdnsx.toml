@@ -39,6 +39,7 @@ database = "dnsx"
 collection = "records"
 
 [export.cassandra]
+# Credentials can also come from RDNSX_CASSANDRA_USERNAME / RDNSX_CASSANDRA_PASSWORD
 # Enable Cassandra export
 enabled = false
 # Cassandra contact points (host:port)

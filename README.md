@@ -6,12 +6,12 @@
 
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/Quinas-Project/RDNSx?style=for-the-badge)](https://github.com/Quinas-Project/RDNSx/stargazers)
-[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/quinas/rdnsx)
+[![GitHub Stars](https://img.shields.io/github/stars/TelcoSec-Tools/RDNSx?style=for-the-badge)](https://github.com/TelcoSec-Tools/RDNSx/stargazers)
+[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/telcosec/rdnsx)
 
 *High-performance DNS enumeration, reconnaissance, and analysis toolkit for security researchers and network administrators*
 
-[📖 Documentation](https://rdnsx.quinas.cloud/) • [🚀 Quick Start](https://rdnsx.quinas.cloud/guide/quick-start) • [🐛 Report Issues](https://github.com/Quinas-Project/RDNSx/issues)
+[📖 Documentation](https://rdnsx.telcosec.net/) • [🚀 Quick Start](https://rdnsx.telcosec.net/guide/quick-start) • [🐛 Report Issues](https://github.com/TelcoSec-Tools/RDNSx/issues)
 
 </div>
 
@@ -98,18 +98,18 @@ RDNSx supports comprehensive DNS record type querying for thorough network analy
 
 ## 📚 Documentation
 
-Complete documentation is available at **[https://rdnsx.quinas.cloud/](https://rdnsx.quinas.cloud/)**
+Complete documentation is available at **[https://rdnsx.telcosec.net/](https://rdnsx.telcosec.net/)**
 
 ### Quick Links
-- [📦 Installation Guide](https://rdnsx.quinas.cloud/guide/installation)
-- [🚀 Quick Start Tutorial](https://rdnsx.quinas.cloud/guide/quick-start)
-- [📖 CLI Reference](https://rdnsx.quinas.cloud/api/cli-reference)
-- [🔍 DNS Record Types](https://rdnsx.quinas.cloud/guide/dns-records)
-- [⚙️ Configuration Guide](https://rdnsx.quinas.cloud/guide/configuration)
+- [📦 Installation Guide](https://rdnsx.telcosec.net/guide/installation)
+- [🚀 Quick Start Tutorial](https://rdnsx.telcosec.net/guide/quick-start)
+- [📖 CLI Reference](https://rdnsx.telcosec.net/api/cli-reference)
+- [🔍 DNS Record Types](https://rdnsx.telcosec.net/guide/dns-records)
+- [⚙️ Configuration Guide](https://rdnsx.telcosec.net/guide/configuration)
 
 ## 📋 Prerequisites
 
-- **Rust 1.70+** - Install from [rustup.rs](https://rustup.rs/)
+- **Rust 1.94+** - Install from [rustup.rs](https://rustup.rs/)
 - **Cargo** - Rust's package manager (comes with Rust)
 - **Git** - For cloning the repository
 
@@ -129,7 +129,7 @@ Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
 
 **Verify Installation:**
 ```bash
-rustc --version  # Should show 1.70+
+rustc --version  # Should show 1.94+
 cargo --version  # Should show cargo version
 ```
 
@@ -150,7 +150,7 @@ For the latest features and custom builds:
 
 ```bash
 # Clone the repository
-git clone https://github.com/Quinas-Project/RDNSx.git
+git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx
 
 # Build optimized release binary
@@ -166,10 +166,10 @@ cargo build --release
 #### Quick Start with Docker
 ```bash
 # Pull and run
-docker run --rm quinas/rdnsx --help
+docker run --rm telcosec/rdnsx --help
 
 # Or use the latest version
-docker pull quinas/rdnsx:latest
+docker pull telcosec/rdnsx:latest
 ```
 
 #### Build Custom Docker Image
@@ -186,8 +186,8 @@ docker run --rm -v $(pwd)/config:/app/config rdnsx --help
 #### Using Pre-built Images
 ```bash
 # Pull from Docker Hub
-docker pull quinas/rdnsx:latest
-docker run --rm quinas/rdnsx --help
+docker pull telcosec/rdnsx:latest
+docker run --rm telcosec/rdnsx --help
 ```
 
 #### Building from Source
@@ -257,15 +257,15 @@ RDNSx provides 11 specialized enumeration techniques for comprehensive DNS recon
 
 | Technique | Command | Description |
 |-----------|---------|-------------|
-| **Zone Transfer** | `zone-transfer` | Attempt DNS zone transfer (AXFR) to retrieve all records |
+| **Zone Transfer** | `zone-transfer` | Attempt AXFR against the zone's authoritative nameservers (or `--axfr-servers`) |
 | **Email Security** | `email-security` | Enumerate SPF, DMARC, DKIM records for email authentication |
 | **CDN Detection** | `cdn-detection` | Detect CDN usage and analyze configuration |
 | **IPv6 Enumeration** | `ipv6-enumeration` | Enumerate IPv6 deployment and addresses |
 | **DNSSEC Analysis** | `dnssec-enumeration` | Analyze DNSSEC configuration and security |
 | **DNSSEC Zone Walking** | `dnssec-zone-walking` | Perform DNSSEC zone walking (NSEC enumeration) |
 | **Wildcard Analysis** | `wildcard-analysis` | Analyze wildcard DNS configurations and bypass techniques |
-| **Passive DNS** | `passive-dns` | Perform passive DNS enumeration using historical data |
-| **Server Fingerprint** | `server-fingerprint` | Fingerprint DNS server capabilities and versions |
+| **Passive DNS** | `passive-dns` | Certificate Transparency names from crt.sh, plus a small active probe |
+| **Server Fingerprint** | `server-fingerprint` | Query a server directly for version.bind, open recursion, EDNS, DNSSEC and TCP |
 | **ASN Enumeration** | `asn-enumeration` | Enumerate ASN information and associated IP ranges |
 | **Comprehensive** | `comprehensive` | Run all enumeration techniques combined |
 
@@ -411,10 +411,24 @@ Global options:
 - `-c, --config`: Configuration file path
 - `-o, --output`: Output file
 - `--json`: JSON output format
-- `--silent`: Minimal output
+- `--silent`: Hide the banner and progress messages (results are still printed)
+- `--timeout`, `-r/--resolvers`, `--rate-limit`, `--threads`: override the config file
 - `--create-config`: Create example configuration file
 
 Command-specific options are documented in `--help` for each command.
+
+### Build features
+
+The database exporters are optional Cargo features (all enabled by default in the CLI).
+For a smaller binary without database drivers:
+
+```bash
+cargo build --release -p rdnsx --no-default-features
+# or pick one: --features export-elasticsearch | export-mongodb | export-cassandra
+```
+
+Library users get no exporters unless they enable `rdnsx-core`'s `elasticsearch`,
+`mongodb` or `cassandra` features.
 
 ## Performance
 
@@ -429,24 +443,25 @@ RDNSx is optimized for high-performance DNS resolution:
 We welcome contributions from the community! Here's how you can get involved:
 
 ### Ways to Contribute
-- 🐛 **Report Bugs**: Found an issue? [Open a bug report](https://github.com/Quinas-Project/RDNSx/issues/new?template=bug_report.md)
-- 💡 **Suggest Features**: Have an idea? [Submit a feature request](https://github.com/Quinas-Project/RDNSx/issues/new?template=feature_request.md)
+- 🐛 **Report Bugs**: Found an issue? [Open a bug report](https://github.com/TelcoSec-Tools/RDNSx/issues/new?template=bug_report.md)
+- 💡 **Suggest Features**: Have an idea? [Submit a feature request](https://github.com/TelcoSec-Tools/RDNSx/issues/new?template=feature_request.md)
 - 🔧 **Code Contributions**: Submit pull requests with improvements
 - 📖 **Documentation**: Help improve docs and examples
 - 🧪 **Testing**: Test on different platforms and report results
 
 ### Development Setup
 ```bash
-git clone https://github.com/Quinas-Project/RDNSx.git
+git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx
 cargo build
-cargo test
+cargo test --workspace                       # offline tests
+cargo test --workspace -- --include-ignored  # plus tests that need public DNS
 ```
 
 ### 📊 Project Stats
-[![GitHub contributors](https://img.shields.io/github/contributors/Quinas-Project/RDNSx?style=flat-square)](https://github.com/Quinas-Project/RDNSx/graphs/contributors)
-[![GitHub issues](https://img.shields.io/github/issues/Quinas-Project/RDNSx?style=flat-square)](https://github.com/Quinas-Project/RDNSx/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/Quinas-Project/RDNSx?style=flat-square)](https://github.com/Quinas-Project/RDNSx/pulls)
+[![GitHub contributors](https://img.shields.io/github/contributors/TelcoSec-Tools/RDNSx?style=flat-square)](https://github.com/TelcoSec-Tools/RDNSx/graphs/contributors)
+[![GitHub issues](https://img.shields.io/github/issues/TelcoSec-Tools/RDNSx?style=flat-square)](https://github.com/TelcoSec-Tools/RDNSx/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/TelcoSec-Tools/RDNSx?style=flat-square)](https://github.com/TelcoSec-Tools/RDNSx/pulls)
 
 ## 📄 License
 
@@ -456,8 +471,8 @@ cargo test
 
 <div align="center">
 
-**Built with ❤️ by the [Quinas Project](https://github.com/Quinas-Project) community**
+**Built with ❤️ by the [TelcoSec](https://github.com/TelcoSec-Tools) community**
 
-[⭐ Star us on GitHub](https://github.com/Quinas-Project/RDNSx) • [🐛 Report Issues](https://github.com/Quinas-Project/RDNSx/issues) • [💬 Discussions](https://github.com/Quinas-Project/RDNSx/discussions)
+[⭐ Star us on GitHub](https://github.com/TelcoSec-Tools/RDNSx) • [🐛 Report Issues](https://github.com/TelcoSec-Tools/RDNSx/issues) • [💬 Discussions](https://github.com/TelcoSec-Tools/RDNSx/discussions)
 
 </div>
