@@ -5,7 +5,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use rand::Rng;
+use rand::RngExt;
 use tracing::debug;
 
 use crate::error::Result;
@@ -268,9 +268,9 @@ impl WildcardFilter {
 
     /// Generate a random subdomain for testing wildcards
     fn random_subdomain(base: &str) -> String {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let random_str: String = (0..16)
-            .map(|_| rng.gen_range(b'a'..=b'z') as char)
+            .map(|_| rng.random_range(b'a'..=b'z') as char)
             .collect();
         format!("{}.{}", random_str, base)
     }
