@@ -7,7 +7,7 @@ set -e
 echo "🐳 Building RDNSx Docker image..."
 
 # Build the Docker image
-docker build -t rdnsx:latest .
+docker build -t rdnsx:latest -t telcosec/rdnsx:latest .
 
 echo "✅ Build complete!"
 echo ""

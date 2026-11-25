@@ -1,6 +1,5 @@
 //! Error types for RDNSx Core
 
-
 use thiserror::Error;
 
 /// Result type alias for RDNSx operations

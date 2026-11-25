@@ -1,0 +1,80 @@
+<nav aria-label="Breadcrumb" class="breadcrumb-nav">
+  <ol class="breadcrumb" itemscope itemtype="https://schema.org/BreadcrumbList">
+    <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+      <a href="{{ site.url }}" itemprop="item">
+        <span itemprop="name">Home</span>
+      </a>
+      <meta itemprop="position" content="1" />
+    </li>
+
+    {% assign crumbs = page.url | remove:'/index.html' | split: '/' %}
+    {% assign crumb_path = '' %}
+    {% assign position = 2 %}
+
+    {% for crumb in crumbs offset: 1 %}
+      {% assign crumb_path = crumb_path | append: '/' | append: crumb %}
+      {% if forloop.last %}
+        <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem" class="active" aria-current="page">
+          <span itemprop="name">{{ page.title | default: crumb | replace: '-', ' ' | capitalize }}</span>
+          <meta itemprop="position" content="{{ position }}" />
+        </li>
+      {% else %}
+        <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+          <a href="{{ site.url }}{{ crumb_path }}/" itemprop="item">
+            <span itemprop="name">
+              {% case crumb %}
+                {% when 'guide' %}Guides
+                {% when 'api' %}API Reference
+                {% else %}{{ crumb | replace: '-', ' ' | capitalize }}
+              {% endcase %}
+            </span>
+          </a>
+          <meta itemprop="position" content="{{ position }}" />
+        </li>
+      {% endif %}
+      {% assign position = position | plus: 1 %}
+    {% endfor %}
+  </ol>
+</nav>
+
+<style>
+.breadcrumb-nav {
+  margin-bottom: 2rem;
+  font-size: 0.9rem;
+}
+
+.breadcrumb {
+  background-color: transparent;
+  padding: 0.5rem 0;
+  margin-bottom: 1rem;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.breadcrumb li {
+  display: flex;
+  align-items: center;
+}
+
+.breadcrumb li:not(:last-child)::after {
+  content: "/";
+  margin: 0 0.5rem;
+  color: #6c757d;
+}
+
+.breadcrumb a {
+  color: #0366d6;
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb .active {
+  color: #6c757d;
+  font-weight: 500;
+}
+</style>
