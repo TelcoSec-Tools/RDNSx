@@ -1,7 +1,7 @@
 //! DNS record structures and implementations
 
-use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 
 use crate::{RecordType, RecordValue, ResponseCode};
 
@@ -48,15 +48,39 @@ impl DnsRecord {
             query_time_ms,
         }
     }
+
+    /// Create a placeholder record describing a negative answer
+    /// (NXDOMAIN, SERVFAIL, REFUSED, or NOERROR with no data).
+    pub fn negative(
+        domain: String,
+        record_type: RecordType,
+        response_code: ResponseCode,
+        resolver: String,
+        query_time_ms: f64,
+    ) -> Self {
+        Self::new(
+            domain,
+            record_type,
+            RecordValue::Empty,
+            0,
+            response_code,
+            resolver,
+            query_time_ms,
+        )
+    }
+
+    /// Whether this record represents a negative answer rather than data
+    pub fn is_negative(&self) -> bool {
+        matches!(self.value, RecordValue::Empty)
+    }
 }
 
 impl std::fmt::Display for DnsRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} [{}]",
-            self.domain,
-            self.value.to_string()
-        )
+        if self.is_negative() {
+            write!(f, "{} [{}]", self.domain, self.response_code)
+        } else {
+            write!(f, "{} [{}]", self.domain, self.value)
+        }
     }
 }

@@ -5,7 +5,7 @@ description: "Complete guide to RDNSx, the fastest DNS enumeration toolkit writt
 keywords: "RDNSx, DNS toolkit, Rust DNS scanner, network enumeration, ASN lookup, reverse DNS, subdomain enumeration, DNSSEC analysis, security research tools, network reconnaissance, command line DNS, DNS record types, IPv6 enumeration, email security analysis, CDN detection, zone transfer, passive DNS, server fingerprinting, DNS bruteforce, Rust CLI tools, network security, penetration testing, red team tools, cybersecurity, network analysis, domain intelligence, DNS enumeration tools, network mapping, security assessment"
 og_image: /assets/images/logo.svg
 twitter_card: summary_large_image
-author: "Quinas Project"
+author: "TelcoSec"
 lang: en-US
 permalink: /
 priority: 1.0
@@ -34,7 +34,7 @@ RDNSx is a **high-performance DNS enumeration toolkit** written in Rust, designe
 
 <article itemscope itemtype="https://schema.org/TechArticle">
   <meta itemprop="headline" content="RDNSx: Next-Generation DNS Enumeration Toolkit" />
-  <meta itemprop="author" content="Quinas Project" />
+  <meta itemprop="author" content="TelcoSec" />
   <meta itemprop="datePublished" content="2024-01-01" />
 
 RDNSx represents the next generation of DNS reconnaissance tools, combining **Rust's performance advantages** with **comprehensive security research capabilities**. Whether you're conducting penetration testing, network assessments, performing security audits, or building DNS-aware applications, RDNSx provides the industry-leading tools you need for thorough DNS intelligence gathering and network mapping.
@@ -198,8 +198,8 @@ New to RDNSx? Get started in minutes with our comprehensive guides:
 
 ### Community & Support
 - [**Frequently Asked Questions**](faq) - Common questions and troubleshooting guide
-- [**Contributing Guide**](https://github.com/Quinas-Project/RDNSx/blob/main/CONTRIBUTING.md) - How to contribute to RDNSx
-- [**Issue Tracker**](https://github.com/Quinas-Project/RDNSx/issues) - Report bugs and request features
+- [**Contributing Guide**](https://github.com/TelcoSec-Tools/RDNSx/blob/main/CONTRIBUTING.md) - How to contribute to RDNSx
+- [**Issue Tracker**](https://github.com/TelcoSec-Tools/RDNSx/issues) - Report bugs and request features
 
 <!-- Newsletter Signup Section -->
 <section class="newsletter-section">
@@ -279,12 +279,12 @@ rdnsx enumerate --technique asn-enumeration --target AS15169 --json > asn-report
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](https://github.com/Quinas-Project/RDNSx/blob/main/CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [Contributing Guide](https://github.com/TelcoSec-Tools/RDNSx/blob/main/CONTRIBUTING.md) for details.
 
 ## 📄 License
 
-RDNSx is released under the MIT License. See the [LICENSE](https://github.com/Quinas-Project/RDNSx/blob/main/LICENSE) file for details.
+RDNSx is released under the MIT License. See the [LICENSE](https://github.com/TelcoSec-Tools/RDNSx/blob/main/LICENSE) file for details.
 
 ---
 
-**Built by [Quinas Project](https://github.com/Quinas-Project)**
+**Built by [TelcoSec](https://github.com/TelcoSec-Tools)**

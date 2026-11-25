@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use futures::stream::{self, StreamExt};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
-use tracing::{debug, warn, info};
+use tracing::{info, warn};
 
 use crate::error::{DnsxError, Result};
 use crate::types::DnsRecord;
@@ -83,10 +83,7 @@ where
     }
 
     /// Process items concurrently with streaming
-    pub async fn process_stream<I>(
-        &self,
-        items: I,
-    ) -> Result<(Vec<DnsRecord>, ProcessingMetrics)>
+    pub async fn process_stream<I>(&self, items: I) -> Result<(Vec<DnsRecord>, ProcessingMetrics)>
     where
         I: Iterator<Item = T> + Send,
         T: Send + 'static,
@@ -174,8 +171,6 @@ where
 
         Ok((all_records, metrics))
     }
-
-
 }
 
 /// Rate limiter for controlling request frequency
@@ -188,11 +183,10 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter
     pub fn new(requests_per_second: u64) -> Self {
-        let interval = if requests_per_second > 0 {
-            Duration::from_micros(1_000_000 / requests_per_second)
-        } else {
-            Duration::from_micros(0)
-        };
+        let interval = 1_000_000u64
+            .checked_div(requests_per_second)
+            .map(Duration::from_micros)
+            .unwrap_or(Duration::from_micros(0));
 
         Self {
             interval,
@@ -200,22 +194,27 @@ impl RateLimiter {
         }
     }
 
-    /// Wait until the next request can be made
+    /// Wait until the next request can be made without holding lock across await
     pub async fn wait(&self) {
         if self.interval.as_micros() == 0 {
             return;
         }
 
-        let mut last_request = self.last_request.lock().unwrap();
-        let now = Instant::now();
-        let elapsed = now.duration_since(*last_request);
+        let sleep_duration = {
+            let mut last_request = self.last_request.lock().unwrap();
+            let now = Instant::now();
+            let scheduled = if *last_request > now {
+                *last_request + self.interval
+            } else {
+                now + self.interval
+            };
+            *last_request = scheduled;
+            scheduled.saturating_duration_since(now)
+        };
 
-        if elapsed < self.interval {
-            let sleep_duration = self.interval - elapsed;
+        if !sleep_duration.is_zero() {
             tokio::time::sleep(sleep_duration).await;
         }
-
-        *last_request = Instant::now();
     }
 }
 
@@ -256,7 +255,8 @@ impl<R: std::io::BufRead> DomainStreamer<R> {
                 Some(Err(e)) => Some(Err(DnsxError::Other(format!("IO error: {}", e)))),
                 None => None,
             }
-        }).filter_map(|result| {
+        })
+        .filter_map(|result| {
             match result {
                 Ok(s) if s.is_empty() => None, // Filter out empty lines
                 other => Some(other),
@@ -280,7 +280,7 @@ impl AdaptiveBatchSizer {
             current_size: initial_size,
             min_size,
             max_size,
-            target_qps: 1000.0, // Target 1000 queries per second
+            target_qps: 1000.0,     // Target 1000 queries per second
             adjustment_factor: 1.2, // Adjust by 20%
         }
     }
@@ -289,12 +289,12 @@ impl AdaptiveBatchSizer {
     pub fn adjust(&mut self, current_qps: f64) {
         if current_qps > self.target_qps * 1.1 {
             // Too fast, increase batch size
-            self.current_size = ((self.current_size as f64 * self.adjustment_factor) as usize)
-                .min(self.max_size);
+            self.current_size =
+                ((self.current_size as f64 * self.adjustment_factor) as usize).min(self.max_size);
         } else if current_qps < self.target_qps * 0.9 {
             // Too slow, decrease batch size
-            self.current_size = ((self.current_size as f64 / self.adjustment_factor) as usize)
-                .max(self.min_size);
+            self.current_size =
+                ((self.current_size as f64 / self.adjustment_factor) as usize).max(self.min_size);
         }
     }
 
