@@ -96,6 +96,20 @@ pub async fn raw_query(
     Ok(response)
 }
 
+/// Send one query to `server` over TCP only
+pub async fn raw_query_tcp(
+    server: SocketAddr,
+    name: &Name,
+    rtype: HRecordType,
+    opts: RawQueryOptions,
+) -> Result<Message> {
+    let request = build_query(name, rtype, &opts);
+    let bytes = request
+        .to_vec()
+        .map_err(|e| DnsxError::Other(format!("Failed to encode query: {}", e)))?;
+    tcp_exchange(server, &bytes, request.id, opts.timeout).await
+}
+
 async fn udp_exchange(
     server: SocketAddr,
     bytes: &[u8],

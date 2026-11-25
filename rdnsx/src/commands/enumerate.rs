@@ -7,6 +7,7 @@ use clap::Args;
 use rdnsx_core::{config::DnsxOptions, DnsEnumerator, ResolverPool};
 
 use crate::cli::Config;
+use crate::exporters::{CassandraTuning, ExportSink};
 use crate::output_writer::OutputWriter;
 
 /// DNS enumeration command arguments
@@ -38,9 +39,14 @@ pub struct EnumerateArgs {
     #[arg(long, default_value = "1000")]
     pub max_names: usize,
 
-    /// Maximum concurrent enumeration tasks
-    #[arg(long, default_value = "10")]
-    pub concurrent: usize,
+    /// Maximum concurrent queries (default: the global --threads / config value)
+    #[arg(long)]
+    pub concurrent: Option<usize>,
+
+    /// Don't look up address owners with Team Cymru (CDN detection then relies on
+    /// the CNAME chain and built-in edge ranges only)
+    #[arg(long)]
+    pub no_asn_lookup: bool,
 }
 
 /// Enumeration techniques available
@@ -60,9 +66,9 @@ pub enum EnumerationTechnique {
     DnssecEnumeration,
     /// Perform DNSSEC zone walking (NSEC enumeration)
     DnssecZoneWalking,
-    /// Analyze wildcard DNS configurations and bypass techniques
+    /// Detect wildcard DNS and find record types that tell real names apart
     WildcardAnalysis,
-    /// Perform passive DNS enumeration using historical data
+    /// Passive subdomain discovery from Certificate Transparency (crt.sh); sends no DNS queries
     PassiveDns,
     /// Enumerate ASN information and associated IP ranges
     AsnEnumeration,
@@ -76,7 +82,10 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
         resolvers: config.core_config.resolvers.servers.clone(),
         timeout: std::time::Duration::from_secs(config.core_config.resolvers.timeout),
         retries: config.core_config.resolvers.retries,
-        concurrency: args.concurrent,
+        concurrency: args
+            .concurrent
+            .unwrap_or(config.core_config.performance.threads)
+            .max(1),
         rate_limit: config.core_config.performance.rate_limit,
     };
 
@@ -90,7 +99,8 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
 
     // Create resolver pool and enumerator
     let resolver_pool = Arc::new(ResolverPool::new(&dns_options)?);
-    let enumerator = DnsEnumerator::new(resolver_pool.clone());
+    let enumerator =
+        DnsEnumerator::new(resolver_pool.clone()).with_cdn_asn_lookup(!args.no_asn_lookup);
     let mut output = OutputWriter::new(
         config.output_file.clone(),
         config.json_output,
@@ -135,9 +145,13 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
         zone: fingerprint_zone.as_deref(),
     };
 
+    // Only zone transfers produce DNS records to export
+    let sink = ExportSink::from_config(&config, CassandraTuning::default()).await?;
+
     match args.technique {
         EnumerationTechnique::ZoneTransfer => {
-            perform_zone_transfer(&enumerator, &args.target, &axfr_servers, &mut output).await?;
+            perform_zone_transfer(&enumerator, &args.target, &axfr_servers, &sink, &mut output)
+                .await?;
         }
         EnumerationTechnique::EmailSecurity => {
             perform_email_security_enumeration(&enumerator, &args.target, &mut output).await?;
@@ -174,12 +188,14 @@ pub async fn run(args: EnumerateArgs, config: Config) -> Result<()> {
                 &args.target,
                 &axfr_servers,
                 &fingerprint,
+                &sink,
                 &mut output,
             )
             .await?;
         }
     }
 
+    sink.finish().await?;
     output.flush()?;
     Ok(())
 }
@@ -188,10 +204,14 @@ async fn perform_zone_transfer(
     enumerator: &DnsEnumerator,
     domain: &str,
     nameservers: &[String],
+    sink: &ExportSink,
     output: &mut OutputWriter,
 ) -> Result<()> {
     if output.is_json() {
         let result = enumerator.zone_transfer(domain, nameservers).await?;
+        for record in &result.records {
+            sink.export(record).await;
+        }
         output.write_json(&result)?;
         return Ok(());
     }
@@ -206,12 +226,22 @@ async fn perform_zone_transfer(
 
     match enumerator.zone_transfer(domain, nameservers).await {
         Ok(result) => {
+            for record in &result.records {
+                sink.export(record).await;
+            }
             output.write_line(&format!("📊 Zone Transfer Results for {}", result.domain))?;
             output.write_line(&"=".repeat(50))?;
 
             if !result.successful_transfers.is_empty() {
                 output.write_line("✅ Successful transfers from:")?;
                 for ns in &result.successful_transfers {
+                    output.write_line(&format!("  • {}", ns))?;
+                }
+            }
+
+            if !result.incomplete_transfers.is_empty() {
+                output.write_line("\n⚠️  Incomplete transfers (stopped before the closing SOA):")?;
+                for ns in &result.incomplete_transfers {
                     output.write_line(&format!("  • {}", ns))?;
                 }
             }
@@ -224,9 +254,20 @@ async fn perform_zone_transfer(
             }
 
             output.write_line(&format!(
-                "\n📋 Discovered records: {}",
-                result.records.len()
+                "\n📋 Discovered records: {}{}",
+                result.records.len(),
+                if result.records.is_empty() || result.complete {
+                    String::new()
+                } else {
+                    " (partial copy)".to_string()
+                }
             ))?;
+            if result.skipped_records > 0 {
+                output.write_line(&format!(
+                    "   ({} records of unsupported types left out)",
+                    result.skipped_records
+                ))?;
+            }
 
             if !result.records.is_empty() {
                 output.write_line("\n🔍 Record Summary:")?;
@@ -292,7 +333,15 @@ async fn perform_email_security_enumeration(
             }
 
             if let Some(dmarc) = &result.dmarc_record {
-                output.write_line("\n🔒 DMARC Record:")?;
+                output.write_line(&format!(
+                    "\n🔒 DMARC Record{}:",
+                    result
+                        .dmarc_domain
+                        .as_deref()
+                        .filter(|d| *d != domain.trim_end_matches('.'))
+                        .map(|d| format!(" (inherited from {})", d))
+                        .unwrap_or_default()
+                ))?;
                 output.write_line(&format!("  {}", dmarc.content))?;
                 output.write_line(&format!("  (via: {})", dmarc.resolver))?;
             } else {
@@ -308,8 +357,28 @@ async fn perform_email_security_enumeration(
                 output.write_line("\n❌ No DKIM selectors found")?;
             }
 
+            let mut warnings: Vec<&String> = Vec::new();
+            let mut advice: Vec<&String> = Vec::new();
+            if let Some(a) = &result.spf_analysis {
+                warnings.extend(&a.warnings);
+                advice.extend(&a.recommendations);
+            }
+            if let Some(a) = &result.dmarc_analysis {
+                warnings.extend(&a.warnings);
+                advice.extend(&a.recommendations);
+            }
+            if !warnings.is_empty() {
+                output.write_line("\n⚠️  Issues:")?;
+                for w in warnings {
+                    output.write_line(&format!("  • {}", w))?;
+                }
+            }
+
             // Provide security recommendations
             output.write_line("\n💡 Security Recommendations:")?;
+            for line in advice {
+                output.write_line(&format!("  • {}", line))?;
+            }
 
             if result.spf_records.is_empty() {
                 output.write_line("  • Add SPF record to prevent email spoofing")?;
@@ -350,10 +419,21 @@ async fn perform_cdn_detection(
             output.write_line(&format!("🚀 CDN Detection Results for {}", result.domain))?;
             output.write_line(&"=".repeat(50))?;
 
-            if let Some(provider) = &result.cdn_provider {
-                output.write_line(&format!("✅ CDN Provider Detected: {}", provider))?;
+            if result.analysis.is_behind_cdn {
+                output.write_line(&format!(
+                    "✅ Behind a CDN: {} (confidence {:.0}%)",
+                    result.cdn_provider.as_deref().unwrap_or("unknown"),
+                    result.analysis.confidence_score * 100.0
+                ))?;
             } else {
-                output.write_line("❌ No CDN provider detected")?;
+                output.write_line("❌ No CDN detected")?;
+            }
+
+            if !result.analysis.detection_reasons.is_empty() {
+                output.write_line("\n🔎 Evidence:")?;
+                for reason in &result.analysis.detection_reasons {
+                    output.write_line(&format!("  • {}", reason))?;
+                }
             }
 
             if !result.cname_chain.is_empty() {
@@ -363,16 +443,34 @@ async fn perform_cdn_detection(
                 }
             }
 
-            if let Some(ip) = result.origin_ip {
-                output.write_line(&format!("\n🏠 Origin IP: {}", ip))?;
+            if !result.addresses.is_empty() {
+                output.write_line("\n🏠 Addresses:")?;
+                for ip in &result.addresses {
+                    output.write_line(&format!("  • {}", ip))?;
+                }
             }
 
-            // Provide insights
-            if result.cdn_provider.is_some() {
+            if let Some(asn) = result
+                .analysis
+                .origin_server_info
+                .as_ref()
+                .and_then(|o| o.asn_info.as_ref())
+            {
+                output.write_line(&format!(
+                    "\n🏢 Owner of {}: AS{} {} ({}, registry country {})",
+                    result.origin_ip.map(|ip| ip.to_string()).unwrap_or_default(),
+                    asn.asn,
+                    asn.organization,
+                    asn.prefix.as_deref().unwrap_or("?"),
+                    asn.country.as_deref().unwrap_or("?")
+                ))?;
+            }
+
+            if !result.analysis.security_implications.is_empty() {
                 output.write_line("\n💡 Insights:")?;
-                output.write_line("  • Traffic is likely served through a CDN")?;
-                output.write_line("  • Origin server may be protected from direct access")?;
-                output.write_line("  • Consider CDN-specific enumeration techniques")?;
+                for line in &result.analysis.security_implications {
+                    output.write_line(&format!("  • {}", line))?;
+                }
             }
         }
         Err(e) => {
@@ -757,28 +855,18 @@ async fn perform_wildcard_analysis(
             }
 
             if !analysis.bypass_attempts.is_empty() {
-                output.write_line("\n🛡️ Wildcard Bypass Attempts:")?;
-                let successful_bypasses: Vec<_> = analysis
-                    .bypass_attempts
-                    .iter()
-                    .filter(|attempt| attempt.success)
-                    .collect();
-
-                if !successful_bypasses.is_empty() {
-                    output.write_line("  ✅ Successful bypass techniques:")?;
-                    for attempt in &successful_bypasses {
-                        output.write_line(&format!(
-                            "    • {}: {}",
-                            attempt.technique, attempt.test_domain
-                        ))?;
-                    }
-                } else {
-                    output.write_line("  ❌ No bypass techniques successful")?;
-                }
-
-                let failed_count = analysis.bypass_attempts.len() - successful_bypasses.len();
-                if failed_count > 0 {
-                    output.write_line(&format!("  📊 {} bypass attempts failed", failed_count))?;
+                output.write_line("\n🛡️ Record types the wildcard does not answer:")?;
+                for attempt in &analysis.bypass_attempts {
+                    output.write_line(&format!(
+                        "  {} {}{}",
+                        if attempt.success { "✅" } else { "❌" },
+                        attempt.technique,
+                        attempt
+                            .response_ip
+                            .as_deref()
+                            .map(|r| format!(" (wildcard answers: {})", r))
+                            .unwrap_or_default()
+                    ))?;
                 }
             }
 
@@ -793,9 +881,9 @@ async fn perform_wildcard_analysis(
                         "  • High confidence wildcard detection - most subdomains will resolve",
                     )?;
                 }
-                if !analysis.bypass_attempts.is_empty() {
+                if analysis.bypass_attempts.iter().any(|a| a.success) {
                     output.write_line(
-                        "  • Some bypass techniques work - can find non-wildcard domains",
+                        "  • Query candidates for the ✅ types above to tell real names from wildcard matches",
                     )?;
                 }
             } else {
@@ -827,7 +915,9 @@ async fn perform_passive_dns_enumeration(
         "📚 Performing passive DNS enumeration for: {}",
         domain
     ))?;
-    output.write_line("Note: queries Certificate Transparency logs (crt.sh) and actively probes a few common names.")?;
+    output.write_line(
+        "Note: queries Certificate Transparency logs (crt.sh); no DNS queries are sent for the target.",
+    )?;
     output.write_line("")?;
 
     match enumerator.passive_dns_enumeration(domain).await {
@@ -995,6 +1085,7 @@ async fn perform_comprehensive_enumeration(
     domain: &str,
     axfr_servers: &[String],
     fingerprint: &FingerprintTargets<'_>,
+    sink: &ExportSink,
     output: &mut OutputWriter,
 ) -> Result<()> {
     if output.is_json() {
@@ -1019,9 +1110,16 @@ async fn perform_comprehensive_enumeration(
             fingerprints.push(value);
         }
 
+        let zone_transfer = enumerator.zone_transfer(domain, axfr_servers).await;
+        if let Ok(result) = &zone_transfer {
+            for record in &result.records {
+                sink.export(record).await;
+            }
+        }
+
         let comprehensive = serde_json::json!({
             "domain": domain,
-            "zone_transfer": section(enumerator.zone_transfer(domain, axfr_servers).await),
+            "zone_transfer": section(zone_transfer),
             "dnssec": section(enumerator.dnssec_enumeration(domain).await),
             "wildcard_analysis": section(enumerator.wildcard_analysis(domain).await),
             "passive_dns": section(enumerator.passive_dns_enumeration(domain).await),
@@ -1043,7 +1141,7 @@ async fn perform_comprehensive_enumeration(
     output.write_line("")?;
 
     // Zone Transfer
-    if let Err(e) = perform_zone_transfer(enumerator, domain, axfr_servers, output).await {
+    if let Err(e) = perform_zone_transfer(enumerator, domain, axfr_servers, sink, output).await {
         eprintln!("Zone transfer enumeration failed: {}", e);
     }
 

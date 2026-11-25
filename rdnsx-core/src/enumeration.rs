@@ -62,6 +62,12 @@ impl DnsEnumerator {
         self.cdn_detector.detect(domain).await
     }
 
+    /// Enable or disable the Team Cymru ASN lookups used by CDN detection
+    pub fn with_cdn_asn_lookup(mut self, enabled: bool) -> Self {
+        self.cdn_detector = self.cdn_detector.with_asn_lookup(enabled);
+        self
+    }
+
     /// Enumerate IPv6 deployment and addresses
     pub async fn ipv6_enumeration(&self, domain: &str) -> Result<Ipv6EnumerationResult> {
         use crate::enumeration_types::Ipv6EnumerationResult;
@@ -132,17 +138,20 @@ impl DnsEnumerator {
         crate::raw::authoritative_nameservers(&self.resolver_pool, domain).await
     }
 
-    /// Perform passive DNS enumeration using historical data
+    /// Passive subdomain discovery from Certificate Transparency logs (crt.sh).
+    ///
+    /// No DNS queries are sent for the target. `historical_ips` stays empty: no
+    /// built-in source provides historical resolutions yet; implement
+    /// [`PassiveDnsSource`] to add one.
     pub async fn passive_dns_enumeration(
         &self,
         domain: &str,
     ) -> Result<crate::enumeration_types::PassiveDnsResult> {
         info!("Performing passive DNS enumeration for: {}", domain);
 
-        let sources: Vec<Box<dyn PassiveDnsSource>> = vec![
-            Box::new(CrtShSource),
-            Box::new(LocalResolutionSource::new(self.resolver_pool.clone())),
-        ];
+        // Passive only: nothing is sent to the target's nameservers. The active
+        // probe ([`LocalResolutionSource`]) is available separately.
+        let sources: Vec<Box<dyn PassiveDnsSource>> = vec![Box::new(CrtShSource)];
 
         let mut combined_result = crate::enumeration_types::PassiveDnsResult {
             domain: domain.to_string(),
@@ -290,14 +299,15 @@ impl DnsEnumerator {
                 .any(|r| r.record_type() == HRecordType::RRSIG);
         }
 
-        // 5. TCP transport
-        fingerprint.tcp_support = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            tokio::net::TcpStream::connect(addr),
+        // 5. TCP transport: a real DNS query over TCP, not just a connect
+        fingerprint.tcp_support = raw::raw_query_tcp(
+            addr,
+            &probe_zone,
+            HRecordType::SOA,
+            RawQueryOptions::default(),
         )
         .await
-        .map(|r| r.is_ok())
-        .unwrap_or(false);
+        .is_ok();
 
         Ok(fingerprint)
     }

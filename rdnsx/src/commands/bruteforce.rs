@@ -7,6 +7,7 @@ use clap::Args;
 use rdnsx_core::{Bruteforcer, DnsxClient, RecordType, ResolverPool, WildcardFilter};
 
 use crate::cli::Config;
+use crate::exporters::{CassandraTuning, ExportSink};
 use crate::output_writer::OutputWriter;
 
 #[derive(Args)]
@@ -68,6 +69,8 @@ pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
         config.silent,
     )?;
 
+    let sink = ExportSink::from_config(&config, CassandraTuning::default()).await?;
+
     // Process each domain
     for domain in &args.domain {
         if !config.silent {
@@ -84,7 +87,7 @@ pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
                     .to_string(),
                 None => domain.clone(),
             };
-            let filter = WildcardFilter::new(Some(base.clone()), Arc::clone(&resolver_pool), 0);
+            let filter = WildcardFilter::new(Some(base.clone()), Arc::clone(&resolver_pool), 3);
             if filter.test_wildcard(&base).await.unwrap_or(false) && !config.silent {
                 eprintln!(
                     "Wildcard DNS detected on {}: filtering wildcard answers",
@@ -108,10 +111,12 @@ pub async fn run(args: BruteforceArgs, config: Config) -> Result<()> {
             }
             for record in records {
                 output.write_record(&record, false)?;
+                sink.export(&record).await;
             }
         }
     }
 
+    sink.finish().await?;
     output.flush()?;
     Ok(())
 }

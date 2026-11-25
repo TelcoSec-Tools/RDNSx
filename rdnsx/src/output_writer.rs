@@ -1,6 +1,7 @@
 //! Output writing utilities
 
 use anyhow::Result;
+use rdnsx_core::asn::IpAsnRecord;
 use rdnsx_core::DnsRecord;
 use std::io::{self, BufWriter, Write};
 
@@ -50,6 +51,43 @@ impl OutputWriter {
             writeln!(self.writer, "{}", record)?;
         }
 
+        Ok(())
+    }
+
+    /// Write a record, with its origin AS when one is given
+    pub fn write_record_with_asn(
+        &mut self,
+        record: &DnsRecord,
+        resp_only: bool,
+        asn: Option<&IpAsnRecord>,
+    ) -> Result<()> {
+        let Some(asn) = asn else {
+            return self.write_record(record, resp_only);
+        };
+        let summary = format!(
+            "AS{} {}{}{}",
+            asn.asn,
+            asn.prefix,
+            asn.country
+                .as_deref()
+                .map(|c| format!(" {}", c))
+                .unwrap_or_default(),
+            asn.as_name
+                .as_deref()
+                .map(|n| format!(" {}", n))
+                .unwrap_or_default()
+        );
+        if resp_only {
+            writeln!(self.writer, "{} [{}]", record.value, summary)?;
+        } else if self.json_output {
+            let mut json = serde_json::to_value(record)?;
+            if let Some(obj) = json.as_object_mut() {
+                obj.insert("asn".to_string(), serde_json::to_value(asn)?);
+            }
+            writeln!(self.writer, "{}", json)?;
+        } else {
+            writeln!(self.writer, "{} [{}]", record, summary)?;
+        }
         Ok(())
     }
 
