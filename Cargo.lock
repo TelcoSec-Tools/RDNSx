@@ -2304,7 +2304,7 @@ dependencies = [
  "ipnetwork",
  "mongodb",
  "parking_lot",
- "rand 0.8.8",
+ "rand 0.10.4",
  "regex",
  "reqwest",
  "scylla",
