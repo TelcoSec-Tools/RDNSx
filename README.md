@@ -1,330 +1,148 @@
-# RDNSx ⚡
+# RDNSx
 
 <div align="center">
 
-**Blazing Fast, Multi-Purpose DNS Toolkit in Rust**
+**A fast, multi-purpose DNS toolkit written in Rust**
 
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![GitHub Stars](https://img.shields.io/github/stars/TelcoSec-Tools/RDNSx?style=for-the-badge)](https://github.com/TelcoSec-Tools/RDNSx/stargazers)
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/telcosec/rdnsx)
 
-*High-performance DNS enumeration, reconnaissance, and analysis toolkit for security researchers and network administrators*
-
-[📖 Documentation](https://rdnsx.telcosec.net/) • [🚀 Quick Start](https://rdnsx.telcosec.net/guide/quick-start) • [🐛 Report Issues](https://github.com/TelcoSec-Tools/RDNSx/issues)
+[Documentation](https://rdnsx.telcosec.net/) | [Quick Start](https://rdnsx.telcosec.net/guide/quick-start) | [Report an Issue](https://github.com/TelcoSec-Tools/RDNSx/issues)
 
 </div>
 
----
+RDNSx is a DNS enumeration, reconnaissance and analysis toolkit for security researchers, network administrators and developers. It is a Rust rewrite of [DNSx](https://github.com/projectdiscovery/dnsx), built on async I/O for high-concurrency resolution, and ships both as a CLI and as an embeddable library (`rdnsx-core`).
 
-RDNSx is a high-performance, feature-rich DNS toolkit written in Rust, designed for security researchers, network administrators, and developers. Leveraging Rust's memory safety and async capabilities, RDNSx delivers exceptional performance while maintaining type safety and reliability.
+## Contents
 
-This project is a complete rewrite and enhancement of the popular [DNSx](https://github.com/projectdiscovery/dnsx) tool, optimized for modern async programming patterns and enterprise-grade DNS analysis.
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Library Usage](#library-usage)
+- [Reference](#reference)
+- [Contributing](#contributing)
+- [TelcoSec Academy](#telcosec-academy)
+- [License](#license)
 
-## ✨ Key Features
+## Features
 
-### 🚀 Performance & Speed
-- **⚡ Lightning Fast**: Async/await concurrency for maximum performance
-- **🔄 Concurrent Processing**: Up to 50+ simultaneous DNS queries
-- **🎯 Smart Rate Limiting**: Intelligent throttling to avoid blocking
-- **💾 Memory Efficient**: Rust's ownership system ensures optimal memory usage
+**Resolution**
+- Async, concurrent DNS queries with configurable concurrency and rate limiting
+- 28 record types, including DNSSEC, DANE and service-binding records
+- IPv4 and IPv6 resolution
 
-### 🔍 Comprehensive DNS Analysis
-- **📊 27 DNS Record Types**: Complete support for all major record types
-- **🏢 ASN Intelligence**: Discover networks for Google, Amazon, Cloudflare, and more
-- **🔄 Reverse DNS**: Advanced PTR lookups with ASN integration
-- **🌐 IPv4/IPv6 Support**: Full dual-stack DNS resolution
+**Reconnaissance**
+- Subdomain bruteforcing from wordlists, with wildcard detection
+- ASN enumeration and ASN-driven reverse (PTR) lookups
+- 11 enumeration techniques: zone transfer, email security (SPF, DMARC, DKIM), DNSSEC analysis and zone walking, passive DNS, server fingerprinting and more
 
-### 🛡️ Security Research Tools
-- **🔎 Subdomain Enumeration**: Bruteforce discovery with wordlists
-- **🛡️ Wildcard Detection**: Advanced filtering and bypass techniques
-- **🔐 DNSSEC Analysis**: Security configuration and zone walking
-- **📧 Email Security**: SPF, DMARC, DKIM enumeration
+**Integration**
+- JSON output for pipelines
+- Optional export to Elasticsearch, MongoDB and Cassandra
+- TOML configuration file
+- Docker images and a Docker Compose stack
 
-### 🏗️ Enterprise Ready
-- **🐳 Container Support**: Docker images for easy deployment
-- **🗄️ Database Integration**: Export to Elasticsearch, MongoDB, Cassandra
-- **⚙️ Flexible Configuration**: TOML-based config with advanced options
-- **📚 Library API**: Embeddable Rust library for custom applications
+## Installation
 
-## 📈 Performance Benchmarks
+Requires **Rust 1.94+** ([rustup.rs](https://rustup.rs/)) unless you use Docker.
 
-RDNSx delivers exceptional performance through Rust's async runtime and optimized algorithms:
-
-| Operation | Performance | Notes |
-|-----------|-------------|--------|
-| **DNS Query (A Record)** | ~2-5ms average | Async concurrent processing |
-| **Bulk Resolution (1000 domains)** | <30 seconds | Configurable concurrency |
-| **ASN Enumeration** | ~1-3 seconds | Network discovery |
-| **Reverse DNS (PTR)** | ~50 concurrent lookups | Smart rate limiting |
-| **Memory Usage** | <50MB baseline | Efficient resource utilization |
-
-*Benchmarks performed on standard hardware with 1Gbps connection. Results may vary based on network conditions.*
-
-## 🔧 DNS Record Types
-
-RDNSx supports comprehensive DNS record type querying for thorough network analysis:
-
-| Record Type | Description | Use Case |
-|-------------|-------------|----------|
-| **A** | IPv4 address record | Maps domain to IP address |
-| **AAAA** | IPv6 address record | Maps domain to IPv6 address |
-| **CNAME** | Canonical name record | Domain aliases and redirects |
-| **MX** | Mail exchange record | Email server configuration |
-| **TXT** | Text record | SPF, DKIM, DMARC, and custom data |
-| **NS** | Name server record | Authoritative DNS servers |
-| **SOA** | Start of authority | Zone administrative information |
-| **PTR** | Pointer record | Reverse DNS (IP to hostname) |
-| **SRV** | Service locator record | Service discovery (SIP, XMPP, etc.) |
-| **CAA** | Certification authority authorization | SSL certificate restrictions |
-| **DNSKEY** | DNSSEC public key | DNSSEC key storage |
-| **DS** | Delegation signer | DNSSEC key verification |
-| **RRSIG** | DNSSEC signature | Resource record signatures |
-| **NSEC** | Next secure record | DNSSEC proof of non-existence |
-| **NSEC3** | Hashed next secure record | DNSSEC privacy protection |
-| **HINFO** | Host information | Hardware/software descriptions |
-| **HTTPS** | HTTPS service binding | HTTP/2 and HTTPS configuration |
-| **NAPTR** | Name authority pointer | Dynamic delegation discovery |
-| **SSHFP** | SSH fingerprint | SSH host key verification |
-| **SVCB** | Service binding | Service parameters (HTTPS upgrade) |
-| **TLSA** | TLS certificate association | DANE (DNS-based Authentication) |
-| **URI** | Uniform resource identifier | URI redirects |
-| **AFSDB** | AFS database location | Andrew File System |
-| **CERT** | Certificate record | Public key certificates |
-| **DNAME** | Delegation name | Domain redirection |
-| **KEY** | Key record | Public keys for DNSSEC |
-| **LOC** | Location record | Geographic coordinates |
-| **OPT** | Option record | EDNS extensions |
-
-## 📚 Documentation
-
-Complete documentation is available at **[https://rdnsx.telcosec.net/](https://rdnsx.telcosec.net/)**
-
-### Quick Links
-- [📦 Installation Guide](https://rdnsx.telcosec.net/guide/installation)
-- [🚀 Quick Start Tutorial](https://rdnsx.telcosec.net/guide/quick-start)
-- [📖 CLI Reference](https://rdnsx.telcosec.net/api/cli-reference)
-- [🔍 DNS Record Types](https://rdnsx.telcosec.net/guide/dns-records)
-- [⚙️ Configuration Guide](https://rdnsx.telcosec.net/guide/configuration)
-
-## 📋 Prerequisites
-
-- **Rust 1.94+** - Install from [rustup.rs](https://rustup.rs/)
-- **Cargo** - Rust's package manager (comes with Rust)
-- **Git** - For cloning the repository
-
-### Quick Rust Installation
-
-**Linux/macOS:**
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-```
-
-**Windows (PowerShell):**
-```powershell
-Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
-.\rustup-init.exe
-```
-
-**Verify Installation:**
-```bash
-rustc --version  # Should show 1.94+
-cargo --version  # Should show cargo version
-```
-
-## 🚀 Installation
-
-Choose the installation method that best fits your needs:
-
-### ⚡ Quick Install (Recommended)
-
-Install globally from crates.io:
+**From crates.io**
 ```bash
 cargo install rdnsx
 ```
 
-### 🔨 Build from Source
-
-For the latest features and custom builds:
-
+**From source**
 ```bash
-# Clone the repository
 git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx
-
-# Build optimized release binary
 cargo build --release
-
-# The binary will be at:
-# Linux/macOS: target/release/rdnsx
-# Windows: target/release/rdnsx.exe
+# Binary: target/release/rdnsx (rdnsx.exe on Windows)
 ```
 
-### 🐳 Docker Installation
-
-#### Quick Start with Docker
+**Docker**
 ```bash
-# Pull and run
-docker run --rm telcosec/rdnsx --help
+# Pre-built image
+docker run --rm telcosec/rdnsx:latest --help
 
-# Or use the latest version
-docker pull telcosec/rdnsx:latest
-```
-
-#### Build Custom Docker Image
-```bash
-# Build from source
+# Build locally
 docker build -f docker/Dockerfile -t rdnsx .
 
-# Run with volume mount for config
-docker run --rm -v $(pwd)/config:/app/config rdnsx --help
-```
-
-### Docker Installation
-
-#### Using Pre-built Images
-```bash
-# Pull from Docker Hub
-docker pull telcosec/rdnsx:latest
-docker run --rm telcosec/rdnsx --help
-```
-
-#### Building from Source
-```bash
-# Build using provided Dockerfile
-docker build -f docker/Dockerfile -t rdnsx .
-docker run --rm rdnsx --help
-```
-
-#### Docker Compose (Advanced)
-For complex deployments with databases:
-```bash
-# Start full stack with databases
-docker-compose -f docker/docker-compose.yml up
-
-# Mount config for persistent settings
+# Mount a config directory
 docker run --rm -v $(pwd)/config:/app/config rdnsx --config /app/config/rdnsx.toml query example.com
+
+# Full stack with databases
+docker-compose -f docker/docker-compose.yml up
 ```
+
+**Smaller builds.** The database exporters are optional Cargo features, all enabled by default in the CLI. To build without database drivers:
+
+```bash
+cargo build --release -p rdnsx --no-default-features
+# or enable one: --features export-elasticsearch | export-mongodb | export-cassandra
+```
+
+Library users get no exporters unless they enable the `elasticsearch`, `mongodb` or `cassandra` features of `rdnsx-core`.
 
 ## Usage
 
-### Query DNS Records
+### Query records
 
-Query A records for domains from stdin:
 ```bash
-echo "example.com" | rdnsx query
-```
-
-Query from a file:
-```bash
-rdnsx query --list domains.txt
-```
-
-Query specific record types:
-```bash
+echo "example.com" | rdnsx query                                 # A records from stdin
+rdnsx query --list domains.txt                                   # from a file
 rdnsx query --list domains.txt --record-type MX --record-type TXT
 ```
 
-Use custom configuration:
+### Bruteforce subdomains
+
 ```bash
-rdnsx --config config/rdnsx.toml query example.com
+rdnsx bruteforce --domain example.com --wordlist wordlist.txt
 ```
 
-### Advanced Enumeration
+### Reverse DNS (PTR)
 
-RDNSx supports comprehensive DNS enumeration techniques for security research and network analysis:
-
-#### ASN Enumeration
-Discover IP ranges and network information for Autonomous Systems:
 ```bash
-# Enumerate Google ASN
-rdnsx enumerate --technique asn-enumeration --target AS15169
-
-# Works with or without "AS" prefix
-rdnsx enumerate --technique asn-enumeration --target 16509
+rdnsx ptr 192.168.1.0/24     # CIDR range
+rdnsx ptr AS15169            # all prefixes announced by an ASN
 ```
 
-#### Comprehensive DNS Analysis
-Perform complete DNS enumeration on a target:
+Large ranges are capped to avoid runaway lookups: 10,000 IPs per CIDR and 1,000 IPs per ASN prefix. Up to 50 PTR queries run concurrently.
+
+### Enumeration
+
 ```bash
+rdnsx enumerate --technique asn-enumeration --target AS15169     # "AS" prefix optional
 rdnsx enumerate --technique comprehensive --target example.com
 ```
 
-### Enumeration Techniques
-
-RDNSx provides 11 specialized enumeration techniques for comprehensive DNS reconnaissance:
-
-| Technique | Command | Description |
-|-----------|---------|-------------|
-| **Zone Transfer** | `zone-transfer` | Attempt AXFR against the zone's authoritative nameservers (or `--axfr-servers`) |
-| **Email Security** | `email-security` | Enumerate SPF, DMARC, DKIM records for email authentication |
-| **CDN Detection** | `cdn-detection` | Detect CDN usage and analyze configuration |
-| **IPv6 Enumeration** | `ipv6-enumeration` | Enumerate IPv6 deployment and addresses |
-| **DNSSEC Analysis** | `dnssec-enumeration` | Analyze DNSSEC configuration and security |
-| **DNSSEC Zone Walking** | `dnssec-zone-walking` | Perform DNSSEC zone walking (NSEC enumeration) |
-| **Wildcard Analysis** | `wildcard-analysis` | Analyze wildcard DNS configurations and bypass techniques |
-| **Passive DNS** | `passive-dns` | Certificate Transparency names from crt.sh, plus a small active probe |
-| **Server Fingerprint** | `server-fingerprint` | Query a server directly for version.bind, open recursion, EDNS, DNSSEC and TCP |
-| **ASN Enumeration** | `asn-enumeration` | Enumerate ASN information and associated IP ranges |
-| **Comprehensive** | `comprehensive` | Run all enumeration techniques combined |
-
-### Enhanced Reverse DNS Lookups
-
-RDNSx provides powerful PTR enumeration with ASN integration:
-
-#### ASN-Based PTR Lookups
-Use ASN enumeration results for targeted reverse DNS:
-```bash
-# Lookup PTR records for Google ASN
-rdnsx ptr AS15169
-
-# Results include IP ranges automatically discovered from ASN
-```
-
-#### Smart IP Range Handling
-Large IP ranges are automatically limited to prevent excessive lookups:
-```bash
-# Large ranges are capped at 10,000 IPs
-rdnsx ptr 192.168.0.0/16  # Limited to 10,000 IPs with warning
-
-# Per-prefix limits for ASN ranges
-rdnsx ptr AS16509         # Up to 1,000 IPs per prefix
-```
-
-#### Concurrent Processing
-PTR lookups use concurrent processing for better performance:
-```bash
-# Up to 50 simultaneous PTR queries
-rdnsx ptr 8.8.8.0/24
-```
+| Technique | Description |
+|-----------|-------------|
+| `zone-transfer` | Attempt AXFR against the zone's authoritative nameservers (or `--axfr-servers`) |
+| `email-security` | Enumerate SPF, DMARC and DKIM records |
+| `cdn-detection` | Detect CDN usage and analyze configuration |
+| `ipv6-enumeration` | Enumerate IPv6 deployment and addresses |
+| `dnssec-enumeration` | Analyze DNSSEC configuration |
+| `dnssec-zone-walking` | Walk the zone via NSEC records |
+| `wildcard-analysis` | Analyze wildcard DNS configuration |
+| `passive-dns` | Certificate Transparency names from crt.sh, plus a small active probe |
+| `server-fingerprint` | Query a server directly for version.bind, open recursion, EDNS, DNSSEC and TCP |
+| `asn-enumeration` | Enumerate ASN information and associated IP ranges |
+| `comprehensive` | Run all techniques |
 
 ## Configuration
 
-RDNSx uses a TOML configuration file for advanced settings. Configuration files are stored in the `config/` directory:
+Create an example config, then pass it to any command:
 
-### Creating Configuration
 ```bash
-# Create example configuration file
 rdnsx --create-config config/rdnsx.toml
-```
-
-### Using Configuration
-```bash
-# Use custom configuration with any command
 rdnsx --config config/rdnsx.toml query example.com
-
-# Configuration includes resolver settings, performance tuning, and database exports
 ```
 
-### Configuration Options
+The file covers resolvers, performance tuning and database exports. Exports run automatically for any backend marked `enabled`:
 
-The config file supports:
-- **DNS Resolvers**: Custom DNS servers with timeout/retry settings
-- **Performance**: Concurrency limits and rate limiting
-- **Database Exports**: Elasticsearch, MongoDB, and Cassandra configuration
-
-**Example configuration:**
 ```toml
 [resolvers]
 servers = ["8.8.8.8", "1.1.1.1"]
@@ -335,17 +153,6 @@ retries = 3
 threads = 100
 rate_limit = 0
 
-[export.elasticsearch]
-enabled = true
-url = "http://localhost:9200"
-index = "dns-records"
-```
-
-### Export to Databases
-
-Configure exports in your `rdnsx.toml` config file:
-
-```toml
 [export.elasticsearch]
 enabled = true
 url = "http://localhost:9200"
@@ -363,23 +170,6 @@ username = "cassandra"
 password = "password"
 ```
 
-Then run queries with export enabled:
-```bash
-rdnsx --config config/rdnsx.toml query example.com
-```
-
-### Bruteforce Subdomains
-
-```bash
-rdnsx bruteforce --domain example.com --wordlist wordlist.txt
-```
-
-### Reverse DNS Lookups
-
-```bash
-rdnsx ptr 192.168.1.0/24
-```
-
 ## Library Usage
 
 ```rust
@@ -389,15 +179,11 @@ use rdnsx_core::{DnsxClient, RecordType};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = DnsxClient::new()?;
 
-    // Query A records
-    let records = client.query("example.com", RecordType::A).await?;
-    for record in records {
+    for record in client.query("example.com", RecordType::A).await? {
         println!("{}", record);
     }
 
-    // Lookup IP addresses
-    let ips = client.lookup_ipv4("example.com").await?;
-    for ip in ips {
+    for ip in client.lookup_ipv4("example.com").await? {
         println!("{}", ip);
     }
 
@@ -405,51 +191,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Command Line Options
+## Reference
 
-Global options:
-- `-c, --config`: Configuration file path
-- `-o, --output`: Output file
-- `--json`: JSON output format
-- `--silent`: Hide the banner and progress messages (results are still printed)
-- `--timeout`, `-r/--resolvers`, `--rate-limit`, `--threads`: override the config file
-- `--create-config`: Create example configuration file
+### Global options
 
-Command-specific options are documented in `--help` for each command.
+| Option | Description |
+|--------|-------------|
+| `-c, --config` | Configuration file path |
+| `-o, --output` | Output file |
+| `--json` | JSON output |
+| `--silent` | Hide the banner and progress messages (results are still printed) |
+| `--timeout`, `-r/--resolvers`, `--rate-limit`, `--threads` | Override the config file |
+| `--create-config` | Write an example configuration file |
 
-### Build features
+Run `rdnsx <command> --help` for command-specific options.
 
-The database exporters are optional Cargo features (all enabled by default in the CLI).
-For a smaller binary without database drivers:
+### Supported record types
 
-```bash
-cargo build --release -p rdnsx --no-default-features
-# or pick one: --features export-elasticsearch | export-mongodb | export-cassandra
-```
+| Category | Types |
+|----------|-------|
+| Addressing and aliases | A, AAAA, CNAME, DNAME, PTR |
+| Zone and delegation | NS, SOA |
+| Mail and text | MX, TXT |
+| Services | SRV, NAPTR, URI, HTTPS, SVCB, AFSDB |
+| Security and certificates | CAA, CERT, SSHFP, TLSA |
+| DNSSEC | DNSKEY, DS, RRSIG, NSEC, NSEC3, KEY |
+| Other | HINFO, LOC, OPT |
 
-Library users get no exporters unless they enable `rdnsx-core`'s `elasticsearch`,
-`mongodb` or `cassandra` features.
+### Performance
 
-## Performance
+Indicative figures on standard hardware with a 1 Gbps connection. Results vary with network conditions and resolver choice.
 
-RDNSx is optimized for high-performance DNS resolution:
-- Async/await throughout for non-blocking I/O
-- Connection pooling and reuse
-- Configurable concurrency limits
-- Efficient batching for database exports
+| Operation | Result |
+|-----------|--------|
+| Single A query | ~2-5 ms |
+| Bulk resolution, 1,000 domains | under 30 s |
+| ASN enumeration | ~1-3 s |
+| Baseline memory | under 50 MB |
 
-## 🤝 Community & Contributing
+Full documentation: [Installation](https://rdnsx.telcosec.net/guide/installation) | [Quick Start](https://rdnsx.telcosec.net/guide/quick-start) | [CLI Reference](https://rdnsx.telcosec.net/api/cli-reference) | [Record Types](https://rdnsx.telcosec.net/guide/dns-records) | [Configuration](https://rdnsx.telcosec.net/guide/configuration)
 
-We welcome contributions from the community! Here's how you can get involved:
+## Contributing
 
-### Ways to Contribute
-- 🐛 **Report Bugs**: Found an issue? [Open a bug report](https://github.com/TelcoSec-Tools/RDNSx/issues/new?template=bug_report.md)
-- 💡 **Suggest Features**: Have an idea? [Submit a feature request](https://github.com/TelcoSec-Tools/RDNSx/issues/new?template=feature_request.md)
-- 🔧 **Code Contributions**: Submit pull requests with improvements
-- 📖 **Documentation**: Help improve docs and examples
-- 🧪 **Testing**: Test on different platforms and report results
+Bug reports, feature requests, documentation fixes and pull requests are welcome.
 
-### Development Setup
+- [Open a bug report](https://github.com/TelcoSec-Tools/RDNSx/issues/new?template=bug_report.md)
+- [Request a feature](https://github.com/TelcoSec-Tools/RDNSx/issues/new?template=feature_request.md)
+- [Join the discussion](https://github.com/TelcoSec-Tools/RDNSx/discussions)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. To set up a development build:
+
 ```bash
 git clone https://github.com/TelcoSec-Tools/RDNSx.git
 cd RDNSx
@@ -458,21 +249,18 @@ cargo test --workspace                       # offline tests
 cargo test --workspace -- --include-ignored  # plus tests that need public DNS
 ```
 
-### 📊 Project Stats
-[![GitHub contributors](https://img.shields.io/github/contributors/TelcoSec-Tools/RDNSx?style=flat-square)](https://github.com/TelcoSec-Tools/RDNSx/graphs/contributors)
-[![GitHub issues](https://img.shields.io/github/issues/TelcoSec-Tools/RDNSx?style=flat-square)](https://github.com/TelcoSec-Tools/RDNSx/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/TelcoSec-Tools/RDNSx?style=flat-square)](https://github.com/TelcoSec-Tools/RDNSx/pulls)
+## TelcoSec Academy
 
-## 📄 License
+RDNSx is maintained by TelcoSec. Want to go further with DNS reconnaissance and telecom security? **TelcoSec Academy** offers hands-on training for security researchers and network engineers.
 
-**RDNSx** is released under the [MIT License](LICENSE). Feel free to use, modify, and distribute this software.
+## License
+
+RDNSx is released under the [MIT License](LICENSE).
 
 ---
 
 <div align="center">
 
-**Built with ❤️ by the [TelcoSec](https://github.com/TelcoSec-Tools) community**
-
-[⭐ Star us on GitHub](https://github.com/TelcoSec-Tools/RDNSx) • [🐛 Report Issues](https://github.com/TelcoSec-Tools/RDNSx/issues) • [💬 Discussions](https://github.com/TelcoSec-Tools/RDNSx/discussions)
+Maintained by [TelcoSec](https://github.com/TelcoSec-Tools)
 
 </div>
