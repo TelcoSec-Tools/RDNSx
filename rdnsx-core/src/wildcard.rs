@@ -40,9 +40,11 @@ pub struct WildcardBypassAttempt {
 /// Enhanced wildcard filter for DNS records with bypass techniques
 #[derive(Clone)]
 pub struct WildcardFilter {
-    /// Wildcard answers per zone level (domain -> IPs returned for random names;
-    /// an empty set means no wildcard)
-    patterns: Arc<DashMap<String, HashSet<IpAddr>>>,
+    /// Wildcard answers per zone level (what random names under it resolve to;
+    /// an empty pattern means no wildcard)
+    patterns: Arc<DashMap<String, WildcardPattern>>,
+    /// Random names probed per level
+    probes: usize,
     /// Domain for wildcard detection
     base_domain: Option<String>,
     /// Resolver pool for testing wildcards
@@ -51,23 +53,37 @@ pub struct WildcardFilter {
     analysis_cache: Arc<DashMap<String, WildcardAnalysis>>,
 }
 
-/// Helper struct for domain resolution testing
-struct DomainResolutionResult {
-    /// The resolver gave an answer (as opposed to an invalid name or a network error)
-    answered: bool,
-    resolved: bool,
-    ip: Option<String>,
+/// Answers that random names under one zone level resolve to
+#[derive(Debug, Clone, Default)]
+struct WildcardPattern {
+    ips: HashSet<IpAddr>,
+    /// CNAME targets of the wildcard (lower case, no trailing dot)
+    cnames: HashSet<String>,
+}
+
+impl WildcardPattern {
+    fn is_empty(&self) -> bool {
+        self.ips.is_empty() && self.cnames.is_empty()
+    }
+}
+
+fn norm(name: &str) -> String {
+    name.trim_end_matches('.').to_lowercase()
 }
 
 impl WildcardFilter {
-    /// Create a new wildcard filter
+    /// Create a new wildcard filter.
+    ///
+    /// `probes` is the number of random names resolved per zone level (clamped to
+    /// 2..=5). More probes catch more of a wildcard's rotating IP pool.
     pub fn new(
         base_domain: Option<String>,
         resolver_pool: Arc<ResolverPool>,
-        _threshold: usize,
+        probes: usize,
     ) -> Self {
         Self {
             patterns: Arc::new(DashMap::new()),
+            probes: probes.clamp(2, 5),
             base_domain,
             resolver_pool,
             analysis_cache: Arc::new(DashMap::new()),
@@ -148,66 +164,44 @@ impl WildcardFilter {
         Ok(analysis)
     }
 
-    /// Attempt various wildcard bypass techniques
+    /// Find record types the wildcard does not cover.
+    ///
+    /// A wildcard usually exists for one or two types (A, or a CNAME). If random
+    /// names return nothing for another type (MX, TXT, AAAA...), querying candidate
+    /// names for that type tells real hosts apart from wildcard matches. A type
+    /// counts as a working bypass ("success") when random names get no answer for it.
     async fn attempt_bypass_techniques(&self, domain: &str) -> Vec<WildcardBypassAttempt> {
         let mut attempts = Vec::new();
-
-        // Technique 1: Use invalid DNS characters
-        let invalid_chars = ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"];
-        for &ch in &invalid_chars {
-            let test_domain = format!("test{}.{}", ch, domain);
-            let result = self.test_domain_resolution(&test_domain).await;
+        for rtype in [
+            RecordType::Aaaa,
+            RecordType::Mx,
+            RecordType::Txt,
+            RecordType::Ns,
+            RecordType::Soa,
+        ] {
+            let test_domain = Self::random_subdomain(domain);
+            let answer = match self.resolver_pool.query(&test_domain, rtype).await {
+                Ok((lookup, _)) => {
+                    let first = lookup
+                        .answers()
+                        .iter()
+                        .find(|r| r.record_type() == rtype.to_hickory())
+                        .map(|r| r.data.to_string());
+                    Some(first)
+                }
+                Err(_) => None,
+            };
+            let Some(first) = answer else {
+                continue; // no answer at all: inconclusive
+            };
             attempts.push(WildcardBypassAttempt {
-                technique: format!("Invalid character: {}", ch),
+                technique: format!("Query {} instead of A", rtype),
                 test_domain,
-                success: result.answered && !result.resolved,
-                response_ip: result.ip,
+                success: first.is_none(),
+                response_ip: first,
             });
         }
-
-        // Technique 2: Use very long subdomains
-        let long_subdomain = format!("{}.{}", "a".repeat(100), domain);
-        let result = self.test_domain_resolution(&long_subdomain).await;
-        attempts.push(WildcardBypassAttempt {
-            technique: "Long subdomain (>100 chars)".to_string(),
-            test_domain: long_subdomain,
-            success: result.answered && !result.resolved,
-            response_ip: result.ip,
-        });
-
-        // Technique 3: Use underscore in subdomain
-        let underscore_domain = format!("test_subdomain.{}", domain);
-        let result = self.test_domain_resolution(&underscore_domain).await;
-        attempts.push(WildcardBypassAttempt {
-            technique: "Underscore in subdomain".to_string(),
-            test_domain: underscore_domain,
-            success: result.answered && !result.resolved,
-            response_ip: result.ip,
-        });
-
         attempts
-    }
-
-    /// Test if a domain resolves (helper for bypass techniques)
-    async fn test_domain_resolution(&self, domain: &str) -> DomainResolutionResult {
-        match self.resolver_pool.query(domain, RecordType::A).await {
-            Ok((lookup, _)) => {
-                let ip = lookup.iter().find_map(|rdata| match rdata {
-                    hickory_resolver::proto::rr::RData::A(ip) => Some(ip.to_string()),
-                    _ => None,
-                });
-                DomainResolutionResult {
-                    answered: true,
-                    resolved: ip.is_some(),
-                    ip,
-                }
-            }
-            Err(_) => DomainResolutionResult {
-                answered: false,
-                resolved: false,
-                ip: None,
-            },
-        }
     }
 
     /// Get wildcard analysis for a domain
@@ -273,26 +267,28 @@ impl WildcardFilter {
         format!("{}.{}", random_str, base)
     }
 
-    /// IPs that random (non-existent) names under `domain` resolve to.
-    /// An empty set means the level has no wildcard.
-    pub async fn wildcard_ips(&self, domain: &str) -> HashSet<IpAddr> {
-        if let Some(ips) = self.patterns.get(domain) {
-            return ips.clone();
+    /// What random (non-existent) names under `domain` resolve to
+    async fn pattern(&self, domain: &str) -> WildcardPattern {
+        if let Some(p) = self.patterns.get(domain) {
+            return p.clone();
         }
 
-        let mut ips = HashSet::new();
-        // Two probes: wildcards backed by round-robin pools may return different IPs
-        for _ in 0..2 {
+        let mut pattern = WildcardPattern::default();
+        // Several probes: wildcards backed by round-robin pools return different IPs
+        for _ in 0..self.probes {
             let test_domain = Self::random_subdomain(domain);
             for record_type in [RecordType::A, RecordType::Aaaa] {
                 if let Ok((lookup, _)) = self.resolver_pool.query(&test_domain, record_type).await {
                     for rdata in lookup.iter() {
                         match rdata {
                             hickory_resolver::proto::rr::RData::A(ip) => {
-                                ips.insert(IpAddr::V4(**ip));
+                                pattern.ips.insert(IpAddr::V4(**ip));
                             }
                             hickory_resolver::proto::rr::RData::AAAA(ip) => {
-                                ips.insert(IpAddr::V6(**ip));
+                                pattern.ips.insert(IpAddr::V6(**ip));
+                            }
+                            hickory_resolver::proto::rr::RData::CNAME(target) => {
+                                pattern.cnames.insert(norm(&target.0.to_string()));
                             }
                             _ => {}
                         }
@@ -301,16 +297,22 @@ impl WildcardFilter {
             }
         }
 
-        if !ips.is_empty() {
-            debug!("Detected wildcard DNS for {}: {:?}", domain, ips);
+        if !pattern.is_empty() {
+            debug!("Detected wildcard DNS for {}: {:?}", domain, pattern);
         }
-        self.patterns.insert(domain.to_string(), ips.clone());
-        ips
+        self.patterns.insert(domain.to_string(), pattern.clone());
+        pattern
+    }
+
+    /// IPs that random (non-existent) names under `domain` resolve to.
+    /// An empty set means the level has no address wildcard.
+    pub async fn wildcard_ips(&self, domain: &str) -> HashSet<IpAddr> {
+        self.pattern(domain).await.ips
     }
 
     /// Test if a domain level has wildcard DNS
     pub async fn test_wildcard(&self, domain: &str) -> Result<bool> {
-        Ok(!self.wildcard_ips(domain).await.is_empty())
+        Ok(!self.pattern(domain).await.is_empty())
     }
 
     /// Parent levels of `domain` to test for wildcards, closest first, stopping at the
@@ -355,11 +357,42 @@ impl WildcardFilter {
         false
     }
 
-    /// Drop address records whose IP matches the wildcard answer of a parent level.
+    /// Whether a CNAME from `domain` to `target` is the wildcard's CNAME
+    pub async fn is_wildcard_cname(&self, domain: &str, target: &str) -> bool {
+        let target = norm(target);
+        for level in self.parent_levels(domain) {
+            if self.pattern(&level).await.cnames.contains(&target) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Drop answers explained by a wildcard of a parent level: address records
+    /// with a wildcard IP, and CNAMEs to the wildcard's CNAME target together with
+    /// the rest of their chain (whose records are owned by the target names).
     /// Non-address records and negative answers are kept.
     pub async fn filter_by_ip(&self, records: Vec<DnsRecord>) -> Result<Vec<DnsRecord>> {
+        // Names reached through a wildcard CNAME, followed down the chain
+        let mut tainted: HashSet<String> = HashSet::new();
+        for record in &records {
+            if let crate::types::RecordValue::Domain(target) = &record.value {
+                if record.record_type == RecordType::Cname
+                    && (tainted.contains(&norm(&record.domain))
+                        || self.is_wildcard_cname(&record.domain, target).await)
+                {
+                    tainted.insert(norm(&record.domain));
+                    tainted.insert(norm(target));
+                }
+            }
+        }
+
         let mut filtered = Vec::with_capacity(records.len());
         for record in records {
+            if tainted.contains(&norm(&record.domain)) {
+                debug!("Filtered wildcard CNAME chain record {}", record.domain);
+                continue;
+            }
             if let crate::types::RecordValue::Ip(ip) = &record.value {
                 if self.is_wildcard_answer(&record.domain, ip).await {
                     debug!("Filtered wildcard record {} -> {}", record.domain, ip);

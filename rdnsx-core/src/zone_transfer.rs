@@ -27,7 +27,21 @@ pub struct ZoneTransferResult {
     pub domain: String,
     pub successful_transfers: Vec<String>,
     pub failed_transfers: Vec<(String, String)>,
+    /// Servers whose transfer ended before the closing SOA (subset of
+    /// `successful_transfers`); their records may be partial
+    pub incomplete_transfers: Vec<String>,
+    /// Whether `records` is a complete copy of the zone (ended with the closing SOA)
+    pub complete: bool,
+    /// Records of types RDNSx does not model, left out of `records`
+    pub skipped_records: usize,
     pub records: Vec<DnsRecord>,
+}
+
+/// One AXFR attempt
+struct AxfrOutcome {
+    records: Vec<DnsRecord>,
+    complete: bool,
+    skipped: usize,
 }
 
 /// Zone transfer enumeration functionality
@@ -57,6 +71,9 @@ impl ZoneTransferEnumerator {
             domain: domain.to_string(),
             successful_transfers: Vec::new(),
             failed_transfers: Vec::new(),
+            incomplete_transfers: Vec::new(),
+            complete: false,
+            skipped_records: 0,
             records: Vec::new(),
         };
 
@@ -85,16 +102,25 @@ impl ZoneTransferEnumerator {
             for addr in addrs {
                 let label = format!("{} ({})", ns, addr);
                 match self.attempt_axfr(domain, ns, addr).await {
-                    Ok(records) => {
+                    Ok(outcome) => {
                         info!(
-                            "Zone transfer successful from {}: {} records",
+                            "Zone transfer from {}: {} records{}",
                             label,
-                            records.len()
+                            outcome.records.len(),
+                            if outcome.complete { "" } else { " (incomplete)" }
                         );
-                        results.successful_transfers.push(label);
-                        // Every address serves the same zone: keep the first full copy
-                        if results.records.is_empty() {
-                            results.records.extend(records);
+                        results.successful_transfers.push(label.clone());
+                        if !outcome.complete {
+                            results.incomplete_transfers.push(label);
+                        }
+                        // Every address serves the same zone: keep the first complete
+                        // copy, or a partial one until a complete copy turns up
+                        let better = results.records.is_empty()
+                            || (outcome.complete && !results.complete);
+                        if better {
+                            results.records = outcome.records;
+                            results.complete = outcome.complete;
+                            results.skipped_records = outcome.skipped;
                         }
                     }
                     Err(e) => {
@@ -114,7 +140,7 @@ impl ZoneTransferEnumerator {
         domain: &str,
         nameserver: &str,
         addr: SocketAddr,
-    ) -> Result<Vec<DnsRecord>> {
+    ) -> Result<AxfrOutcome> {
         debug!("Connecting to {} for AXFR on {}", addr, domain);
 
         let mut stream =
@@ -172,6 +198,7 @@ impl ZoneTransferEnumerator {
 
         let mut all_records = Vec::new();
         let mut soa_count = 0;
+        let mut skipped = 0usize;
 
         let transfer_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(120);
 
@@ -258,11 +285,16 @@ impl ZoneTransferEnumerator {
                     soa_count += 1;
                 }
                 let Some(rtype) = RecordType::from_hickory(record.record_type()) else {
+                    skipped += 1;
                     continue;
                 };
 
                 {
-                    if let Ok(val) = crate::query::parse_rdata(&record.data) {
+                    let Ok(val) = crate::query::parse_rdata(&record.data) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    {
                         let dns_rec = DnsRecord::new(
                             record.name.to_string().trim_end_matches('.').to_string(),
                             rtype,
@@ -289,6 +321,10 @@ impl ZoneTransferEnumerator {
             ));
         }
 
-        Ok(all_records)
+        Ok(AxfrOutcome {
+            records: all_records,
+            complete: soa_count >= 2,
+            skipped,
+        })
     }
 }

@@ -28,10 +28,16 @@ pub struct MockZone {
     pub records: Vec<Record>,
     /// Names below this one resolve (A) to `wildcard_ip` unless defined
     pub wildcard: Option<(Name, std::net::Ipv4Addr)>,
+    /// Names below this one are CNAMEs to the target (unless defined)
+    pub wildcard_cname: Option<(Name, Name)>,
     /// Names answered with SERVFAIL
     pub servfail: Vec<Name>,
     /// Allow AXFR
     pub allow_axfr: bool,
+    /// Delegated child zones: names at or below them get a referral
+    pub delegations: Vec<Name>,
+    /// Stop the AXFR stream after the first message (no closing SOA)
+    pub truncate_axfr: bool,
 }
 
 impl MockZone {
@@ -89,13 +95,52 @@ impl MockZone {
         self
     }
 
-    pub fn nsec(mut self, owner: &str, next: &str, types: Vec<RecordType>) -> Self {
+    pub fn nsec(self, owner: &str, next: &str, types: Vec<RecordType>) -> Self {
+        self.nsec_to(owner, name(next), types)
+    }
+
+    pub fn nsec_to(mut self, owner: &str, next: Name, types: Vec<RecordType>) -> Self {
         self.records.push(Record::from_rdata(
             name(owner),
             300,
-            RData::DNSSEC(DNSSECRData::NSEC(NSEC::new(name(next), types))),
+            RData::DNSSEC(DNSSECRData::NSEC(NSEC::new(next, types))),
         ));
         self
+    }
+
+    /// Delegate `child` to `ns` (adds the NS record in the parent)
+    pub fn delegate(mut self, child: &str, ns: &str) -> Self {
+        self.records.push(Record::from_rdata(
+            name(child),
+            3600,
+            RData::NS(NS(name(ns))),
+        ));
+        self.delegations.push(name(child));
+        self
+    }
+
+    /// The delegation covering `qname`, unless the query is for DS at the cut
+    fn delegation_for(&self, qname: &Name, qtype: RecordType) -> Option<&Name> {
+        self.delegations
+            .iter()
+            .find(|cut| cut.zone_of(qname) && !(*cut == qname && qtype == RecordType::DS))
+    }
+
+    /// NSEC records proving that `qname` does not exist (owner < qname < next)
+    fn covering_nsec(&self, qname: &Name) -> Vec<Record> {
+        let origin = self.origin.clone();
+        self.records
+            .iter()
+            .filter(|r| match &r.data {
+                RData::DNSSEC(DNSSECRData::NSEC(nsec)) => {
+                    let next = nsec.next_domain_name();
+                    let wraps = Some(next) == origin.as_ref();
+                    r.name < *qname && (wraps || qname < next)
+                }
+                _ => false,
+            })
+            .cloned()
+            .collect()
     }
 
     fn soa(&self) -> Option<Record> {
@@ -136,6 +181,21 @@ impl MockZone {
 
         if self.records.iter().any(|r| &r.name == qname) {
             return (ResponseCode::NoError, Vec::new()); // NODATA
+        }
+
+        if let Some((base, target)) = &self.wildcard_cname {
+            if base.zone_of(qname) && base != qname {
+                let mut answers = vec![Record::from_rdata(
+                    qname.clone(),
+                    60,
+                    RData::CNAME(CNAME(target.clone())),
+                )];
+                if qtype != RecordType::CNAME {
+                    let (_, mut rest) = self.lookup(target, qtype);
+                    answers.append(&mut rest);
+                }
+                return (ResponseCode::NoError, answers);
+            }
         }
 
         if let Some((base, ip)) = &self.wildcard {
@@ -211,7 +271,21 @@ impl MockZone {
                 second.add_answer(r.clone());
             }
             second.add_answer(soa);
+            if self.truncate_axfr {
+                return vec![first];
+            }
             return vec![first, second];
+        }
+
+        if let Some(cut) = self.delegation_for(query.name(), query.query_type()) {
+            // Referral: no answer, NS (and NSEC for the unsigned cut) in authority
+            response.metadata.authoritative = false;
+            for r in self.records.iter().filter(|r| {
+                &r.name == cut && r.record_type() == RecordType::NS
+            }) {
+                response.add_authority(r.clone());
+            }
+            return vec![response];
         }
 
         let (rcode, answers) = self.lookup(query.name(), query.query_type());
@@ -222,6 +296,11 @@ impl MockZone {
         if response.answers.is_empty() {
             if let Some(soa) = self.soa() {
                 response.add_authority(soa);
+            }
+            if rcode == ResponseCode::NXDomain {
+                for nsec in self.covering_nsec(query.name()) {
+                    response.add_authority(nsec);
+                }
             }
         }
         vec![response]
@@ -284,6 +363,13 @@ pub async fn spawn(zone: MockZone) -> SocketAddr {
                         if stream.write_all(&framed).await.is_err() {
                             return;
                         }
+                    }
+                    let is_axfr = request
+                        .queries
+                        .first()
+                        .is_some_and(|q| q.query_type() == RecordType::AXFR);
+                    if zone.truncate_axfr && is_axfr {
+                        return; // drop the connection mid-transfer
                     }
                 }
             });
