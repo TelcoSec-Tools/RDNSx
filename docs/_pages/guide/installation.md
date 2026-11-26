@@ -58,8 +58,8 @@ Download `rdnsx-windows-x86_64.zip` and extract the `rdnsx.exe` file to a direct
 
 ### Using Docker Hub
 ```bash
-docker pull telcosec/rdnsx:latest
-docker run --rm telcosec/rdnsx --help
+docker pull ghcr.io/telcosec-tools/rdnsx:latest
+docker run --rm ghcr.io/telcosec-tools/rdnsx --help
 ```
 
 ### Building from source
@@ -76,7 +76,7 @@ For more complex setups with database exports:
 version: '3.8'
 services:
   rdnsx:
-    image: telcosec/rdnsx:latest
+    image: ghcr.io/telcosec-tools/rdnsx:latest
     volumes:
       - ./config:/app/config
       - ./output:/app/output

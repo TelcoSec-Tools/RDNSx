@@ -23,7 +23,7 @@ export-cassandra = ["rdnsx-core/cassandra"]
 
 [dependencies]
 # Core library
-rdnsx-core = { path = "../rdnsx-core" }
+rdnsx-core = { path = "../rdnsx-core", version = "0.1.0" }
 
 # Workspace dependencies
 tokio = { workspace = true, features = ["full"] }

@@ -327,3 +327,132 @@ fn negative_record_value_is_empty() {
     assert_eq!(RecordValue::Empty.to_string(), "");
     let _: IpAddr = "192.0.2.1".parse().unwrap();
 }
+
+#[tokio::test]
+async fn zone_walk_crosses_delegations() {
+    let zone = MockZone::new("deleg.test.")
+        .a("a.deleg.test.", [192, 0, 2, 1])
+        .a("www.deleg.test.", [192, 0, 2, 2])
+        .delegate("sub.deleg.test.", "ns.elsewhere.test.")
+        .nsec(
+            "deleg.test.",
+            "a.deleg.test.",
+            vec![HRecordType::SOA, HRecordType::NS],
+        )
+        .nsec("a.deleg.test.", "sub.deleg.test.", vec![HRecordType::A])
+        .nsec("sub.deleg.test.", "www.deleg.test.", vec![HRecordType::NS])
+        .nsec("www.deleg.test.", "deleg.test.", vec![HRecordType::A]);
+    let addr = spawn(zone).await;
+    let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
+    let analyzer = DnssecAnalyzer::new(pool);
+
+    let result = analyzer
+        .zone_walking_with_server("deleg.test", addr, 100)
+        .await
+        .unwrap();
+    assert_eq!(result.stop_reason, "Walked the complete chain");
+    assert_eq!(
+        result.discovered_names,
+        vec![
+            "deleg.test",
+            "a.deleg.test",
+            "sub.deleg.test",
+            "www.deleg.test"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn synthesized_nsec_is_not_walked() {
+    let mut next = hickory_resolver::proto::rr::Name::from_labels(vec![
+        vec![0u8],
+        b"synth".to_vec(),
+        b"test".to_vec(),
+    ])
+    .unwrap();
+    next.set_fqdn(true);
+    let zone = MockZone::new("synth.test.").nsec_to(
+        "synth.test.",
+        next,
+        vec![HRecordType::SOA, HRecordType::NS],
+    );
+    let addr = spawn(zone).await;
+    let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
+    let analyzer = DnssecAnalyzer::new(pool);
+
+    let result = analyzer
+        .zone_walking_with_server("synth.test", addr, 100)
+        .await
+        .unwrap();
+    assert!(!result.enumeration_successful);
+    assert_eq!(result.denial_type, "NSEC (synthesized)");
+    assert!(result.discovered_names.is_empty());
+}
+
+#[tokio::test]
+async fn partial_zone_transfer_is_flagged() {
+    let mut z = zone();
+    z.truncate_axfr = true;
+    let addr = spawn(z).await;
+    let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
+    let enumerator = DnsEnumerator::new(pool);
+
+    let result = enumerator
+        .zone_transfer("rdnsx.test", &[addr.to_string()])
+        .await
+        .unwrap();
+    assert_eq!(result.successful_transfers.len(), 1);
+    assert_eq!(result.incomplete_transfers.len(), 1);
+    assert!(!result.complete);
+    assert!(!result.records.is_empty());
+}
+
+#[tokio::test]
+async fn complete_zone_transfer_is_marked_complete() {
+    let addr = spawn(zone()).await;
+    let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
+    let enumerator = DnsEnumerator::new(pool);
+    let result = enumerator
+        .zone_transfer("rdnsx.test", &[addr.to_string()])
+        .await
+        .unwrap();
+    assert!(result.complete);
+    assert!(result.incomplete_transfers.is_empty());
+}
+
+#[tokio::test]
+async fn wildcard_cname_chains_are_filtered() {
+    let mut z = zone().a("edge.cdn.rdnsx.test.", [203, 0, 113, 9]);
+    z.wildcard_cname = Some((name("cw.rdnsx.test."), name("edge.cdn.rdnsx.test.")));
+    let addr = spawn(z).await;
+    let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
+    let client = DnsxClient::from_pool(Arc::clone(&pool));
+    let filter = WildcardFilter::new(Some("rdnsx.test".to_string()), Arc::clone(&pool), 2);
+
+    let mut records = client
+        .query("candidate.cw.rdnsx.test", RecordType::A)
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 2, "CNAME plus A: {:?}", records);
+    records.extend(client.query("web.rdnsx.test", RecordType::A).await.unwrap());
+
+    let kept = filter.filter_by_ip(records).await.unwrap();
+    assert_eq!(kept.len(), 1, "{:?}", kept);
+    assert_eq!(kept[0].domain, "web.rdnsx.test");
+}
+
+#[tokio::test]
+async fn wildcard_analysis_reports_uncovered_types() {
+    let addr = spawn(zone()).await;
+    let pool = Arc::new(ResolverPool::new(&options(&[addr])).unwrap());
+    let enumerator = DnsEnumerator::new(pool);
+
+    let analysis = enumerator
+        .wildcard_analysis("wild.rdnsx.test")
+        .await
+        .unwrap();
+    assert!(analysis.has_wildcard);
+    // The mock wildcard only covers A, so the other types tell hosts apart
+    assert!(!analysis.bypass_attempts.is_empty());
+    assert!(analysis.bypass_attempts.iter().all(|a| a.success));
+}

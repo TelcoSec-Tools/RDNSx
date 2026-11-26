@@ -10,6 +10,7 @@ use rdnsx_core::{
 };
 
 use crate::cli::Config;
+use crate::exporters::{CassandraTuning, ExportSink};
 use crate::output_writer::OutputWriter;
 
 #[derive(Args)]
@@ -124,7 +125,9 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
     // Bounded concurrency; the resolver pool also enforces the configured rate limit
     let concurrency = config.core_config.performance.threads.clamp(1, 50);
 
-    let results: Vec<_> = stream::iter(ips)
+    let sink = ExportSink::from_config(&config, CassandraTuning::default()).await?;
+
+    let results = stream::iter(ips)
         .map(|ip| {
             let client = Arc::clone(&client);
             async move {
@@ -132,19 +135,22 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
                 client.query(&ptr_domain, RecordType::Ptr).await
             }
         })
-        .buffer_unordered(concurrency)
-        .collect()
-        .await;
+        .buffer_unordered(concurrency);
+    let mut results = std::pin::pin!(results);
 
-    let mut all_records = Vec::new();
+    // Results are written as they arrive
     let mut success_count = 0;
     let mut empty_count = 0;
     let mut error_count = 0;
-    for result in results {
+    while let Some(result) = results.next().await {
         match result {
             Ok(records) if !records.is_empty() => {
                 success_count += 1;
-                all_records.extend(records);
+                for record in &records {
+                    output.write_record(record, false)?;
+                    sink.export(record).await;
+                }
+                output.flush()?;
             }
             Ok(_) => empty_count += 1,
             Err(e) => {
@@ -153,11 +159,7 @@ pub async fn run(args: PtrArgs, config: Config) -> Result<()> {
             }
         }
     }
-
-    // Write all collected records
-    for record in all_records {
-        output.write_record(&record, false)?;
-    }
+    sink.finish().await?;
 
     if !config.silent {
         eprintln!("✅ PTR enumeration completed:");

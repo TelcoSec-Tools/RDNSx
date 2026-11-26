@@ -5,12 +5,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Args;
 use rdnsx_core::{
-    config::DnsxOptions, AdaptiveBatchSizer, CachedDnsClient, ConcurrencyConfig,
-    ConcurrentProcessor, DnsCache, DnsRecord, DnsxClient, DomainStreamer, Exporter,
-    ProcessingMetrics, RecordType, ResolverPool, ResponseCode, WildcardFilter,
+    config::DnsxOptions, CachedDnsClient, DnsCache, DnsxClient, RecordType, RecordValue,
+    ResolverPool, ResponseCode, WildcardFilter,
 };
 
 use crate::cli::Config;
+use crate::exporters::{CassandraTuning, ExportSink};
 use crate::output_writer::OutputWriter;
 
 #[derive(Args)]
@@ -111,9 +111,9 @@ pub struct QueryArgs {
     #[arg(long)]
     pub nsec3: bool,
 
-    /// OPT records
+    /// AFSDB records
     #[arg(long)]
-    pub opt: bool,
+    pub afsdb: bool,
 
     /// RRSIG records
     #[arg(long)]
@@ -135,7 +135,8 @@ pub struct QueryArgs {
     #[arg(long)]
     pub uri: bool,
 
-    /// ASN information
+    /// Add the origin ASN, prefix and registry country of each address
+    /// (Team Cymru DNS lookup: the addresses are sent to asn.cymru.com)
     #[arg(long)]
     pub asn: bool,
 
@@ -151,8 +152,9 @@ pub struct QueryArgs {
     #[arg(long)]
     pub resp_only: bool,
 
-    /// Use streaming mode for large files (reduces memory usage)
-    #[arg(long)]
+    /// Deprecated, no effect: input is always read lazily and results are
+    /// written as each domain completes
+    #[arg(long, hide = true)]
     pub stream: bool,
 
     /// Enable DNS response caching (reduces redundant queries)
@@ -177,10 +179,10 @@ pub struct QueryArgs {
 }
 
 pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
-    // Determine record types to query
-    let record_types = determine_record_types(&args);
+    use futures::stream::{self, StreamExt};
 
-    // Create DNS client
+    let record_types = determine_record_types(&args)?;
+
     let dns_options = DnsxOptions {
         resolvers: config.core_config.resolvers.servers.clone(),
         timeout: std::time::Duration::from_secs(config.core_config.resolvers.timeout),
@@ -191,74 +193,29 @@ pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
     let resolver_pool = Arc::new(ResolverPool::new(&dns_options)?);
     let client = DnsxClient::from_pool(Arc::clone(&resolver_pool));
 
-    // Create wildcard filter if domain specified
-    let wildcard_filter: Option<WildcardFilter> =
-        if let Some(ref base_domain) = args.wildcard_domain {
-            let resolver_pool = Arc::clone(&resolver_pool);
-            Some(WildcardFilter::new(
-                Some(base_domain.clone()),
-                resolver_pool,
-                10, // Default threshold: 10 domains pointing to same IP
-            ))
-        } else {
-            None
-        };
+    let wildcard_filter: Option<WildcardFilter> = args
+        .wildcard_domain
+        .as_ref()
+        .map(|base| WildcardFilter::new(Some(base.clone()), Arc::clone(&resolver_pool), 3));
 
-    // Parse response code filter
     let allowed_rcodes = parse_rcodes(&args.rcode)?;
 
-    // Create output writer
     let mut output = OutputWriter::new(
         config.output_file.clone(),
         config.json_output,
         config.silent,
     )?;
 
-    // Create exporters if configured
-    let exporters = build_exporters(&args, &config).await?;
+    let sink = ExportSink::from_config(
+        &config,
+        CassandraTuning {
+            batch_size: args.cassandra_batch_size,
+            workers: args.cassandra_workers,
+        },
+    )
+    .await?;
 
-    // Determine if we should use streaming mode
-    let use_streaming = args.stream || args.list.is_some(); // Auto-enable for files
-
-    let domains: Vec<String> = if use_streaming && args.list.is_some() {
-        // Use streaming for large files
-        if !config.silent {
-            eprintln!("Using streaming mode for large file processing");
-        }
-        Vec::new() // We'll stream domains directly
-    } else {
-        // Load all domains into memory for small lists or stdin
-        // Read stdin only when no domains were given on the command line
-        let mut domains = if args.list.is_some() || args.domains.is_empty() {
-            read_domains(&args.list)?
-        } else {
-            Vec::new()
-        };
-        domains.extend(args.domains.clone());
-
-        if domains.is_empty() {
-            if !config.silent {
-                eprintln!("No domains to process. Use --list to specify a file or provide domains as arguments.");
-            }
-            return Ok(());
-        }
-        domains
-    };
-
-    // Create adaptive batch sizer if enabled
-    let mut adaptive_batcher = AdaptiveBatchSizer::new(1000, 100, 10000);
-
-    // Create concurrency configuration with adaptive batching
-    let concurrency_config = ConcurrencyConfig {
-        max_concurrent: config.core_config.performance.threads,
-        batch_size: adaptive_batcher.current_size(),
-        timeout: std::time::Duration::from_secs(config.core_config.resolvers.timeout),
-        // The resolver pool enforces the configured rate limit for every query
-        rate_limit: 0,
-    };
-
-    // Create cached client if caching is enabled
-    let (client_clone, cached_client_ref): (
+    let (client, cached_client): (
         Arc<dyn rdnsx_core::DnsQuery + Send + Sync>,
         Option<Arc<CachedDnsClient<DnsxClient>>>,
     ) = if args.cache {
@@ -272,166 +229,168 @@ pub async fn run(args: QueryArgs, config: Config) -> Result<()> {
             args.cache_size,
             std::time::Duration::from_secs(args.cache_ttl),
         );
-        let cached_client = Arc::new(CachedDnsClient::new(client, cache));
-        (
-            cached_client.clone() as Arc<dyn rdnsx_core::DnsQuery + Send + Sync>,
-            Some(cached_client),
-        )
+        let cached = Arc::new(CachedDnsClient::new(client, cache));
+        (cached.clone(), Some(cached))
     } else {
-        (
-            Arc::new(client) as Arc<dyn rdnsx_core::DnsQuery + Send + Sync>,
-            None,
-        )
+        (Arc::new(client), None)
     };
 
-    // Create the concurrent processor with all record types and domains
-    let processor = ConcurrentProcessor::new(concurrency_config, {
-        let record_types = record_types.clone();
-        let client = Arc::clone(&client_clone);
-        let allowed_rcodes = allowed_rcodes.clone();
-        let wildcard_filter = wildcard_filter.clone();
-        let silent = config.silent;
+    // Domains are read lazily and results are written as soon as each domain
+    // completes, so memory use does not grow with the size of the input.
+    let domains = domain_source(&args)?;
+    let concurrency = config.core_config.performance.threads.max(1);
+    let start = std::time::Instant::now();
 
-        move |domain: String| {
-            let record_types = record_types.clone();
+    let results = stream::iter(domains)
+        .filter_map(|line| async move {
+            match line {
+                Ok(d) => {
+                    let d = d.trim().to_string();
+                    (!d.is_empty() && !d.starts_with('#')).then_some(d)
+                }
+                Err(e) => {
+                    eprintln!("Error reading domain: {}", e);
+                    None
+                }
+            }
+        })
+        .map(|domain| {
             let client = Arc::clone(&client);
+            let record_types = record_types.clone();
             let allowed_rcodes = allowed_rcodes.clone();
             let wildcard_filter = wildcard_filter.clone();
-            let silent = silent;
-
-            Box::pin(async move {
-                let mut all_records = Vec::new();
-
-                // Query each record type for this domain
+            async move {
+                let mut records = Vec::new();
+                let mut errors = Vec::new();
                 for record_type in &record_types {
                     match client.query_response(&domain, *record_type).await {
                         Ok(response) => {
                             // With an rcode filter, report negative answers too (as
                             // "domain [NXDOMAIN]") and keep only the matching codes.
-                            let records = if allowed_rcodes.is_empty() {
+                            let found = if allowed_rcodes.is_empty() {
                                 response.records
                             } else if allowed_rcodes.contains(&response.response_code) {
                                 response.into_records_or_negative()
                             } else {
                                 Vec::new()
                             };
-
-                            // Apply wildcard filtering if enabled
-                            let filtered_records = if let Some(ref filter) = wildcard_filter {
-                                filter.filter(records.clone()).await.unwrap_or_else(|e| {
-                                    if !silent {
-                                        eprintln!(
-                                            "Warning: Wildcard filtering failed for {}: {}",
+                            let found = match &wildcard_filter {
+                                Some(filter) => match filter.filter(found.clone()).await {
+                                    Ok(kept) => kept,
+                                    Err(e) => {
+                                        errors.push(format!(
+                                            "Wildcard filtering failed for {}: {}",
                                             domain, e
-                                        );
+                                        ));
+                                        found
                                     }
-                                    records
-                                })
-                            } else {
-                                records
+                                },
+                                None => found,
                             };
-
-                            all_records.extend(filtered_records);
+                            records.extend(found);
                         }
-                        Err(e) => {
-                            if !silent {
-                                eprintln!("Error querying {} ({:?}): {}", domain, record_type, e);
-                            }
-                        }
+                        Err(e) => errors.push(format!(
+                            "Error querying {} ({}): {}",
+                            domain, record_type, e
+                        )),
                     }
                 }
+                (records, errors, record_types.len())
+            }
+        })
+        .buffer_unordered(concurrency);
+    let mut results = std::pin::pin!(results);
 
-                Ok(all_records)
-            })
+    let mut total_domains = 0usize;
+    let mut total_queries = 0usize;
+    let mut failed_queries = 0usize;
+    let mut total_records = 0usize;
+    while let Some((records, errors, queries)) = results.next().await {
+        total_domains += 1;
+        total_queries += queries;
+        failed_queries += errors.len();
+        for error in &errors {
+            eprintln!("{}", error);
         }
-    });
-
-    // Process domains concurrently with adaptive batching
-    let (all_records, metrics) =
-        if let (true, Some(list_path)) = (use_streaming, args.list.as_ref()) {
-            // Streaming mode for large files with adaptive batching
-            let file = std::fs::File::open(list_path)?;
-            let reader = std::io::BufReader::new(file);
-            let streamer = DomainStreamer::new(reader);
-
-            let domain_iter = streamer.stream_domains().filter_map(|result| match result {
-                Ok(domain) if !domain.is_empty() => Some(domain),
-                Ok(_) => None, // Skip empty lines
-                Err(e) => {
-                    eprintln!("Error reading domain: {}", e);
-                    None
+        for record in &records {
+            let asn = if args.asn {
+                match &record.value {
+                    RecordValue::Ip(ip) => rdnsx_core::asn::lookup_ip_asn(&resolver_pool, ip)
+                        .await
+                        .ok(),
+                    _ => None,
                 }
-            });
+            } else {
+                None
+            };
+            output.write_record_with_asn(record, args.resp_only, asn.as_ref())?;
+            sink.export(record).await;
+        }
+        total_records += records.len();
+        output.flush()?;
+    }
 
-            // Collect domains for adaptive batching
-            let mut domains_vec: Vec<String> = domain_iter.collect();
-            // Domains given on the command line are processed too
-            domains_vec.extend(args.domains.iter().cloned());
-
-            // Process with adaptive batching
-            process_with_adaptive_batching(
-                processor,
-                domains_vec,
-                &mut adaptive_batcher,
-                !config.silent,
-            )
-            .await
-            .map_err(anyhow::Error::from)?
-        } else {
-            // In-memory processing for smaller lists
-            processor.process_stream(domains.into_iter()).await?
-        };
+    if total_domains == 0 && !config.silent {
+        eprintln!(
+            "No domains to process. Use --list to specify a file or provide domains as arguments."
+        );
+    }
 
     if !config.silent {
+        let secs = start.elapsed().as_secs_f64();
         eprintln!(
-            "Processed {} domains, collected {} records ({:.1} qps)",
-            metrics.total_domains,
-            all_records.len(),
-            metrics.queries_per_second
+            "Processed {} domains, collected {} records ({:.1} queries/s)",
+            total_domains,
+            total_records,
+            if secs > 0.0 {
+                total_queries as f64 / secs
+            } else {
+                0.0
+            }
         );
-
-        // Show cache statistics if caching was enabled
-        if let Some(ref cached_client) = cached_client_ref {
-            let cache_stats = cached_client.cache_stats();
+        if let Some(cached) = &cached_client {
+            let stats = cached.cache_stats();
             eprintln!(
                 "Cache: {} total entries ({} valid, {} expired)",
-                cache_stats.total_entries, cache_stats.valid_entries, cache_stats.expired_entries
+                stats.total_entries, stats.valid_entries, stats.expired_entries
             );
         }
-
-        for (name, exporter) in &exporters {
-            if let Some(summary) = exporter_summary(name, exporter.as_ref()) {
-                eprintln!("{}", summary);
-            }
-        }
     }
 
-    // Output all records
-    for record in all_records {
-        output.write_record(&record, args.resp_only)?;
-
-        for (name, exporter) in &exporters {
-            if let Err(e) = exporter.export(record.clone()).await {
-                if !config.silent {
-                    eprintln!("Warning: Failed to export to {}: {}", name, e);
-                }
-            }
-        }
-    }
-
-    // Flush exporters
-    for (name, exporter) in &exporters {
-        exporter
-            .flush()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to flush {}: {}", name, e))?;
-    }
-
+    sink.finish().await?;
     output.flush()?;
+
+    if total_queries > 0 && failed_queries == total_queries {
+        anyhow::bail!(
+            "All {} queries failed (no resolver answered); check --resolvers and network access",
+            total_queries
+        );
+    }
     Ok(())
 }
 
-fn determine_record_types(args: &QueryArgs) -> Vec<RecordType> {
+/// Domains to query, read lazily: the `--list` file, or stdin when no domains
+/// were given on the command line, followed by the command-line domains.
+fn domain_source(
+    args: &QueryArgs,
+) -> Result<Box<dyn Iterator<Item = std::io::Result<String>> + Send>> {
+    use std::io::{BufRead, IsTerminal};
+
+    let cli: Vec<std::io::Result<String>> = args.domains.iter().cloned().map(Ok).collect();
+    let input: Box<dyn Iterator<Item = std::io::Result<String>> + Send> =
+        if let Some(path) = &args.list {
+            let file = std::fs::File::open(path)
+                .map_err(|e| anyhow::anyhow!("Cannot open {}: {}", path, e))?;
+            Box::new(std::io::BufReader::new(file).lines())
+        } else if args.domains.is_empty() && !std::io::stdin().is_terminal() {
+            Box::new(std::io::BufReader::new(std::io::stdin()).lines())
+        } else {
+            Box::new(std::iter::empty())
+        };
+    Ok(Box::new(input.chain(cli)))
+}
+
+fn determine_record_types(args: &QueryArgs) -> Result<Vec<RecordType>> {
     let mut types = Vec::new();
 
     // If --record-type is specified, use those
@@ -447,6 +406,7 @@ fn determine_record_types(args: &QueryArgs) -> Vec<RecordType> {
                 "SOA" => types.push(RecordType::Soa),
                 "PTR" => types.push(RecordType::Ptr),
                 "SRV" => types.push(RecordType::Srv),
+                "AFSDB" => types.push(RecordType::Afsdb),
                 "CAA" => types.push(RecordType::Caa),
                 "CERT" => types.push(RecordType::Cert),
                 "DNAME" => types.push(RecordType::Dname),
@@ -459,16 +419,15 @@ fn determine_record_types(args: &QueryArgs) -> Vec<RecordType> {
                 "NAPTR" => types.push(RecordType::Naptr),
                 "NSEC" => types.push(RecordType::Nsec),
                 "NSEC3" => types.push(RecordType::Nsec3),
-                "OPT" => types.push(RecordType::Opt),
                 "RRSIG" => types.push(RecordType::Rrsig),
                 "SSHFP" => types.push(RecordType::Sshfp),
                 "SVCB" => types.push(RecordType::Svcb),
                 "TLSA" => types.push(RecordType::Tlsa),
                 "URI" => types.push(RecordType::Uri),
-                _ => eprintln!("Warning: Unknown record type '{}', ignoring", rt),
+                _ => anyhow::bail!("Unknown record type '{}'", rt),
             }
         }
-        return types;
+        return Ok(types);
     }
 
     // Fall back to individual flags
@@ -532,8 +491,8 @@ fn determine_record_types(args: &QueryArgs) -> Vec<RecordType> {
     if args.nsec3 {
         types.push(RecordType::Nsec3);
     }
-    if args.opt {
-        types.push(RecordType::Opt);
+    if args.afsdb {
+        types.push(RecordType::Afsdb);
     }
     if args.rrsig {
         types.push(RecordType::Rrsig);
@@ -556,230 +515,19 @@ fn determine_record_types(args: &QueryArgs) -> Vec<RecordType> {
         types.push(RecordType::A);
     }
 
-    types
-}
-
-fn read_domains(input_file: &Option<String>) -> Result<Vec<String>> {
-    let lines = if let Some(file) = input_file {
-        std::fs::read_to_string(file)?
-            .lines()
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        // Read from stdin (not from an interactive terminal: nothing would arrive)
-        use std::io::{self, BufRead, IsTerminal};
-        let stdin = io::stdin();
-        if stdin.is_terminal() {
-            Vec::new()
-        } else {
-            stdin.lock().lines().collect::<io::Result<Vec<String>>>()?
-        }
-    };
-
-    Ok(lines.into_iter().filter(|s| !s.trim().is_empty()).collect())
+    Ok(types)
 }
 
 fn parse_rcodes(rcode_str: &Option<String>) -> Result<Vec<ResponseCode>> {
-    if let Some(rcodes) = rcode_str {
-        let mut result = Vec::new();
-        for code_str in rcodes.split(',') {
-            let code = match code_str.trim().to_uppercase().as_str() {
-                "NOERROR" => ResponseCode::NoError,
-                "SERVFAIL" => ResponseCode::ServFail,
-                "NXDOMAIN" => ResponseCode::NxDomain,
-                "REFUSED" => ResponseCode::Refused,
-                "FORMERR" => ResponseCode::FormErr,
-                "NOTIMP" => ResponseCode::NotImp,
-                _ => continue, // Skip unknown codes
-            };
-            result.push(code);
-        }
-        Ok(result)
-    } else {
-        Ok(Vec::new()) // No filter
-    }
-}
-
-/// Process domains with adaptive batch sizing based on performance
-async fn process_with_adaptive_batching<F>(
-    processor: ConcurrentProcessor<String, F>,
-    domains: Vec<String>,
-    adaptive_batcher: &mut AdaptiveBatchSizer,
-    verbose: bool,
-) -> rdnsx_core::error::Result<(Vec<DnsRecord>, ProcessingMetrics)>
-where
-    F: Fn(String) -> futures::future::BoxFuture<'static, rdnsx_core::error::Result<Vec<DnsRecord>>>
-        + Send
-        + Sync
-        + 'static,
-{
-    let mut all_records = Vec::new();
-    let mut total_metrics = ProcessingMetrics::default();
-    let start_time = std::time::Instant::now();
-
-    // Process in chunks with adaptive batch sizing
-    let mut start_idx = 0;
-    let mut iteration = 0;
-
-    while start_idx < domains.len() {
-        let batch_size = adaptive_batcher
-            .current_size()
-            .min(domains.len() - start_idx);
-        let end_idx = start_idx + batch_size;
-
-        if verbose && iteration > 0 {
-            eprintln!(
-                "Processing batch {}-{} (adaptive batch size: {})",
-                start_idx + 1,
-                end_idx,
-                batch_size
-            );
-        }
-
-        // Create a new processor with the current batch size
-        let batch_processor = ConcurrentProcessor::new(
-            ConcurrencyConfig {
-                max_concurrent: processor.config().max_concurrent,
-                batch_size: batch_size.min(1000), // Cap internal batch size
-                timeout: processor.config().timeout,
-                rate_limit: processor.config().rate_limit,
-            },
-            {
-                let query_fn = Arc::clone(processor.query_fn());
-                move |domain: String| {
-                    let query_fn = Arc::clone(&query_fn);
-                    Box::pin(async move { query_fn(domain).await })
-                }
-            },
-        );
-
-        let batch_domains = domains[start_idx..end_idx].to_vec();
-        let (batch_records, batch_metrics) = batch_processor
-            .process_stream(batch_domains.into_iter())
-            .await?;
-
-        all_records.extend(batch_records);
-        total_metrics.total_domains += batch_metrics.total_domains;
-        total_metrics.successful_queries += batch_metrics.successful_queries;
-        total_metrics.failed_queries += batch_metrics.failed_queries;
-        total_metrics.total_query_time += batch_metrics.total_query_time;
-
-        // Adjust batch size based on performance
-        if batch_metrics.queries_per_second > 0.0 {
-            adaptive_batcher.adjust(batch_metrics.queries_per_second);
-        }
-
-        start_idx = end_idx;
-        iteration += 1;
-    }
-
-    // Calculate final metrics
-    let total_time = start_time.elapsed();
-    if total_metrics.total_domains > 0 {
-        total_metrics.average_query_time =
-            total_metrics.total_query_time / total_metrics.total_domains as u32;
-    }
-    if total_time.as_secs_f64() > 0.0 {
-        total_metrics.queries_per_second =
-            total_metrics.total_domains as f64 / total_time.as_secs_f64();
-    }
-
-    Ok((all_records, total_metrics))
-}
-
-/// Exporters enabled in the configuration, by name
-type NamedExporters = Vec<(&'static str, Box<dyn Exporter>)>;
-
-/// Build the exporters enabled in the config. Fails if an exporter is enabled but
-/// this binary was built without it.
-async fn build_exporters(args: &QueryArgs, config: &Config) -> Result<NamedExporters> {
-    let export = &config.core_config.export;
-    #[allow(unused_mut)]
-    let mut exporters: NamedExporters = Vec::new();
-    let _ = args;
-
-    if export.elasticsearch.enabled {
-        #[cfg(feature = "export-elasticsearch")]
-        exporters.push((
-            "Elasticsearch",
-            Box::new(
-                rdnsx_core::ElasticsearchExporter::new(
-                    &export.elasticsearch.url,
-                    &export.elasticsearch.index,
-                    export.batch_size,
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to create Elasticsearch exporter: {}", e))?,
-            ),
-        ));
-        #[cfg(not(feature = "export-elasticsearch"))]
-        anyhow::bail!("Elasticsearch export is enabled but rdnsx was built without the export-elasticsearch feature");
-    }
-
-    if export.mongodb.enabled {
-        #[cfg(feature = "export-mongodb")]
-        exporters.push((
-            "MongoDB",
-            Box::new(
-                rdnsx_core::MongodbExporter::new(
-                    &export.mongodb.url,
-                    &export.mongodb.database,
-                    &export.mongodb.collection,
-                    export.batch_size,
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to create MongoDB exporter: {}", e))?,
-            ),
-        ));
-        #[cfg(not(feature = "export-mongodb"))]
-        anyhow::bail!(
-            "MongoDB export is enabled but rdnsx was built without the export-mongodb feature"
-        );
-    }
-
-    if export.cassandra.enabled {
-        #[cfg(feature = "export-cassandra")]
-        {
-            let cassandra = &export.cassandra;
-            let non_empty = |s: &str| {
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s.to_string())
-                }
-            };
-            let cassandra_config = rdnsx_core::CassandraConfig {
-                contact_points: cassandra.contact_points.clone(),
-                username: non_empty(&cassandra.username),
-                password: non_empty(&cassandra.password),
-                keyspace: cassandra.keyspace.clone(),
-                table: cassandra.table.clone(),
-                batch_size: args.cassandra_batch_size,
-                num_workers: args.cassandra_workers,
-                ..Default::default()
-            };
-            exporters.push((
-                "Cassandra",
-                Box::new(
-                    rdnsx_core::CassandraExporter::with_config(cassandra_config)
-                        .await
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to create Cassandra exporter: {}", e)
-                        })?,
-                ),
-            ));
-        }
-        #[cfg(not(feature = "export-cassandra"))]
-        anyhow::bail!(
-            "Cassandra export is enabled but rdnsx was built without the export-cassandra feature"
-        );
-    }
-
-    Ok(exporters)
-}
-
-/// One-line performance summary for exporters that track metrics
-fn exporter_summary(name: &str, exporter: &dyn Exporter) -> Option<String> {
-    let metrics = exporter.metrics_summary()?;
-    Some(format!("{}: {}", name, metrics))
+    let Some(rcodes) = rcode_str else {
+        return Ok(Vec::new()); // No filter
+    };
+    rcodes
+        .split(',')
+        .filter(|c| !c.trim().is_empty())
+        .map(|c| {
+            ResponseCode::from_name(c)
+                .ok_or_else(|| anyhow::anyhow!("Unknown response code '{}'", c.trim()))
+        })
+        .collect()
 }

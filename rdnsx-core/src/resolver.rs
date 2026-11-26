@@ -23,8 +23,10 @@ pub struct ResolverPool {
     resolvers: Vec<(Arc<TokioResolver>, String)>,
     /// Concurrency semaphore
     semaphore: Arc<Semaphore>,
-    /// Query timeout
+    /// Per-attempt query timeout
     timeout: Duration,
+    /// Attempts per resolver (hickory retries internally)
+    attempts: u32,
     /// Round-robin index for load balancing
     rr_index: std::sync::atomic::AtomicUsize,
     /// Optional global rate limiter (queries per second)
@@ -69,7 +71,8 @@ impl ResolverPool {
 
         let mut resolver_opts = ResolverOpts::default();
         resolver_opts.timeout = options.timeout;
-        resolver_opts.attempts = options.retries.max(1) as usize;
+        let attempts = options.retries.max(1);
+        resolver_opts.attempts = attempts as usize;
         resolver_opts.validate = false; // Don't validate, just resolve
         resolver_opts.use_hosts_file = ResolveHosts::Never; // Don't use hosts file
 
@@ -91,6 +94,7 @@ impl ResolverPool {
             resolvers: pool,
             semaphore: Arc::new(Semaphore::new(options.concurrency.max(1))),
             timeout: options.timeout,
+            attempts,
             rr_index: std::sync::atomic::AtomicUsize::new(0),
             rate_limiter,
         })
@@ -147,7 +151,7 @@ impl ResolverPool {
                 domain, record_type, resolver_addr
             );
             let result = tokio::time::timeout(
-                self.timeout,
+                self.lookup_budget(),
                 resolver.lookup(domain_name.clone(), record_type.to_hickory()),
             )
             .await;
@@ -215,6 +219,11 @@ impl ResolverPool {
             record_type,
             last_error.unwrap_or_else(|| "no resolvers".to_string())
         )))
+    }
+
+    /// Time allowed for one resolver, covering all of hickory's attempts
+    fn lookup_budget(&self) -> Duration {
+        self.timeout * self.attempts + Duration::from_millis(500)
     }
 
     /// Get primary resolver address

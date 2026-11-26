@@ -52,7 +52,7 @@ RDNSx stands out with:
 ### What's the easiest way to install RDNSx?
 ```bash
 # Quick install via Cargo
-cargo install rdnsx
+cargo install --git https://github.com/TelcoSec-Tools/RDNSx rdnsx
 
 # Or build from source
 git clone https://github.com/TelcoSec-Tools/RDNSx.git
@@ -226,14 +226,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### How do I use RDNSx with Docker?
 ```bash
 # Pull the official image
-docker pull telcosec/rdnsx:latest
+docker pull ghcr.io/telcosec-tools/rdnsx:latest
 
 # Run basic queries
-docker run --rm telcosec/rdnsx query example.com
+docker run --rm ghcr.io/telcosec-tools/rdnsx query example.com
 
 # Mount config volume
 docker run --rm -v $(pwd)/config:/app/config \
-  telcosec/rdnsx --config /app/config/rdnsx.toml query example.com
+  ghcr.io/telcosec-tools/rdnsx --config /app/config/rdnsx.toml query example.com
 ```
 
 ---

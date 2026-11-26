@@ -26,6 +26,9 @@ pub struct DnssecEnumerationResult {
     pub rrsig_records: usize,
     pub nsec_records: usize,
     pub nsec3_records: usize,
+    /// The apex NSEC is synthesized per query (minimal NSEC / compact denial),
+    /// so the zone cannot be walked despite using NSEC
+    pub nsec_synthesized: bool,
     pub security_issues: Vec<String>,
     pub recommendations: Vec<String>,
     /// Chain-of-trust check (DS matches a DNSKEY, and signatures validate)
@@ -118,6 +121,7 @@ impl DnssecAnalyzer {
             rrsig_records: 0,
             nsec_records: 0,
             nsec3_records: 0,
+            nsec_synthesized: false,
             security_issues: Vec::new(),
             recommendations: Vec::new(),
             chain_validation: None,
@@ -174,11 +178,14 @@ impl DnssecAnalyzer {
                         .count();
                 }
                 if let Ok(msg) = raw::raw_query(server, &apex, HRecordType::NSEC, opts).await {
-                    result.nsec_records = msg
-                        .answers
-                        .iter()
-                        .filter(|r| r.record_type() == HRecordType::NSEC)
-                        .count();
+                    for record in &msg.answers {
+                        if let RData::DNSSEC(DNSSECRData::NSEC(nsec)) = &record.data {
+                            result.nsec_records += 1;
+                            if is_synthesized_nsec(&record.name, nsec.next_domain_name()) {
+                                result.nsec_synthesized = true;
+                            }
+                        }
+                    }
                 }
                 if let Ok(msg) = raw::raw_query(server, &apex, HRecordType::NSEC3PARAM, opts).await
                 {
@@ -279,7 +286,11 @@ impl DnssecAnalyzer {
             }
         }
 
-        if result.nsec_records > 0 {
+        if result.nsec_synthesized {
+            result.recommendations.push(
+                "Zone uses synthesized minimal NSEC (online signing): not walkable".to_string(),
+            );
+        } else if result.nsec_records > 0 {
             result
                 .security_issues
                 .push("Zone uses NSEC: its contents can be enumerated by zone walking".to_string());
@@ -389,29 +400,32 @@ impl DnssecAnalyzer {
                 break;
             }
 
-            let msg = match raw::raw_query(server, &current, HRecordType::NSEC, opts).await {
-                Ok(msg) => msg,
+            let nsec = match find_nsec(server, &current, opts).await {
+                Ok(Some(nsec)) => nsec,
+                Ok(None) => {
+                    result.stop_reason = format!("No NSEC record returned for {}", current);
+                    break;
+                }
                 Err(e) => {
                     result.stop_reason = format!("Query for {} failed: {}", current, e);
                     break;
                 }
             };
 
-            let nsec = msg.answers.iter().find_map(|r| match &r.data {
-                RData::DNSSEC(DNSSECRData::NSEC(nsec)) if r.name == current => Some(nsec.clone()),
-                _ => None,
-            });
-
-            let Some(nsec) = nsec else {
-                result.stop_reason = format!("No NSEC record returned for {}", current);
-                break;
-            };
-
-            result.denial_type = "NSEC".to_string();
-            let owner = current.to_string().trim_end_matches('.').to_string();
             let next = nsec.next_domain_name().clone();
-            let next_str = next.to_string().trim_end_matches('.').to_string();
+            if is_synthesized_nsec(&current, &next) {
+                // "Black lies" / compact denial: the server signs a fake
+                // NSEC per query, so there is no real chain to follow.
+                result.denial_type = "NSEC (synthesized)".to_string();
+                result.stop_reason =
+                    "Zone uses synthesized minimal NSEC (online signing); it cannot be walked"
+                        .to_string();
+                break;
+            }
+            result.denial_type = "NSEC".to_string();
 
+            let owner = current.to_string().trim_end_matches('.').to_string();
+            let next_str = next.to_string().trim_end_matches('.').to_string();
             if !result.discovered_names.contains(&owner) {
                 result.discovered_names.push(owner.clone());
             }
@@ -536,4 +550,97 @@ pub struct ChainValidationResult {
     pub chain_valid: bool,
     pub validation_errors: Vec<String>,
     pub trust_anchor_status: Option<String>,
+}
+
+/// The NSEC record owned by `owner`, from an authoritative server.
+///
+/// Asks for type NSEC at the name first. At a delegation point the server
+/// answers with a referral instead, so the record is then taken from the
+/// authority section, or, failing that, from the NXDOMAIN proof for a name
+/// that sorts right after `owner` without being below it (`owner` with a
+/// `\000` byte appended to its first label).
+async fn find_nsec(
+    server: std::net::SocketAddr,
+    owner: &hickory_resolver::proto::rr::Name,
+    opts: RawQueryOptions,
+) -> Result<Option<hickory_resolver::proto::dnssec::rdata::NSEC>> {
+    let pick = |msg: &hickory_resolver::proto::op::Message| {
+        msg.answers
+            .iter()
+            .chain(msg.authorities.iter())
+            .find_map(|r| match &r.data {
+                RData::DNSSEC(DNSSECRData::NSEC(nsec)) if r.name == *owner => Some(nsec.clone()),
+                _ => None,
+            })
+    };
+
+    let msg = raw::raw_query(server, owner, HRecordType::NSEC, opts).await?;
+    if let Some(nsec) = pick(&msg) {
+        return Ok(Some(nsec));
+    }
+
+    let Some(probe) = name_after(owner) else {
+        return Ok(None);
+    };
+    let msg = raw::raw_query(server, &probe, HRecordType::A, opts).await?;
+    Ok(pick(&msg))
+}
+
+/// `owner` with a zero byte appended to its first label: the closest name that
+/// sorts after `owner` and its whole subtree in canonical DNS order.
+pub fn name_after(
+    owner: &hickory_resolver::proto::rr::Name,
+) -> Option<hickory_resolver::proto::rr::Name> {
+    let mut labels: Vec<Vec<u8>> = owner.iter().map(|l| l.to_vec()).collect();
+    let first = labels.first_mut()?;
+    if first.len() >= 63 {
+        return None;
+    }
+    first.push(0);
+    let mut name = hickory_resolver::proto::rr::Name::from_labels(labels).ok()?;
+    name.set_fqdn(true);
+    Some(name)
+}
+
+/// Whether an NSEC record is a synthesized "minimal" one (Cloudflare black lies,
+/// RFC 9824 compact denial): its next name is `\000.<owner>`.
+pub fn is_synthesized_nsec(
+    owner: &hickory_resolver::proto::rr::Name,
+    next: &hickory_resolver::proto::rr::Name,
+) -> bool {
+    next.num_labels() == owner.num_labels() + 1
+        && next.iter().next() == Some(&[0u8][..])
+        && next.base_name().to_lowercase() == owner.to_lowercase()
+}
+
+#[cfg(test)]
+mod walk_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    fn n(s: &str) -> hickory_resolver::proto::rr::Name {
+        hickory_resolver::proto::rr::Name::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn detects_synthesized_nsec() {
+        let owner = n("example.com.");
+        let next = hickory_resolver::proto::rr::Name::from_labels(vec![
+            vec![0u8],
+            b"example".to_vec(),
+            b"com".to_vec(),
+        ])
+        .unwrap();
+        assert!(is_synthesized_nsec(&owner, &next));
+        assert!(!is_synthesized_nsec(&owner, &n("www.example.com.")));
+    }
+
+    #[test]
+    fn name_after_sorts_after_subtree() {
+        let owner = n("sub.example.com.");
+        let probe = name_after(&owner).unwrap();
+        assert!(probe > owner);
+        assert!(probe > n("zzz.sub.example.com."));
+        assert!(probe < n("tub.example.com."));
+    }
 }

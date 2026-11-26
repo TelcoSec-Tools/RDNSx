@@ -209,6 +209,9 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         //     altitude: loc.altitude(),
         // }),
         RData::Unknown { code, rdata: raw } => {
+            if let Some(value) = decode_unknown(u16::from(*code), &raw.anything) {
+                return Ok(value);
+            }
             let hex = raw
                 .anything
                 .iter()
@@ -253,5 +256,60 @@ pub fn parse_rdata(rdata: &RData) -> Result<RecordValue> {
         }),
         // Everything else: use the presentation format
         _ => Ok(RecordValue::Other(rdata.to_string())),
+    }
+}
+
+/// Decode record types hickory leaves as raw data: LOC (RFC 1876) and URI (RFC 7553)
+fn decode_unknown(code: u16, data: &[u8]) -> Option<RecordValue> {
+    let u32_at = |i: usize| -> Option<u32> {
+        Some(u32::from_be_bytes(data.get(i..i + 4)?.try_into().ok()?))
+    };
+    match code {
+        29 if data.len() == 16 && data[0] == 0 => Some(RecordValue::Loc {
+            version: data[0],
+            size: data[1],
+            horiz_pre: data[2],
+            vert_pre: data[3],
+            latitude: u32_at(4)?,
+            longitude: u32_at(8)?,
+            altitude: u32_at(12)?,
+        }),
+        256 if data.len() >= 4 => Some(RecordValue::Uri {
+            priority: u16::from_be_bytes([data[0], data[1]]),
+            weight: u16::from_be_bytes([data[2], data[3]]),
+            target: String::from_utf8_lossy(&data[4..]).to_string(),
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    #[test]
+    fn decodes_uri() {
+        let mut data = vec![0, 10, 0, 1];
+        data.extend_from_slice(b"sip:alice@example.com");
+        assert_eq!(
+            decode_unknown(256, &data).unwrap().to_string(),
+            "10 1 sip:alice@example.com"
+        );
+    }
+
+    #[test]
+    fn decodes_loc() {
+        // 51.5 N, 0.25 W, 10 m
+        let lat = (1u64 << 31) + (51.5 * 3_600_000.0) as u64;
+        let lon = (1u64 << 31) - (0.25 * 3_600_000.0) as u64;
+        let alt = 100_000 * 100 + 1000;
+        let mut data = vec![0, 0x12, 0x16, 0x13];
+        data.extend_from_slice(&(lat as u32).to_be_bytes());
+        data.extend_from_slice(&(lon as u32).to_be_bytes());
+        data.extend_from_slice(&(alt as u32).to_be_bytes());
+        assert_eq!(
+            decode_unknown(29, &data).unwrap().to_string(),
+            "51.500000 -0.250000 10.00m"
+        );
     }
 }
